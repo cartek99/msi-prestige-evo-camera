@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: CC0-1.0
+# DRAFT (2026-11-16) — OV5675 tuning for the upstream softisp IPA (libcamera >= 0.8, src/ipa/softisp/data/).
+# Calibration only; the "looks" (gamma/contrast/saturation, warm tint) stay in ../looks/.
+# Values marked TBD are measured in the master A/B (docs/UPSTREAM.md, plan step 4) before sending.
+# Ported from: looks/auto-v1.yaml (CCM, Keith-approved daylight colour) + 0.7.2 patches 0005/0006 ideas.
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  # Single-illuminant CCM (~6500 K daylight): fitted against a colour chart shown on a phone screen,
+  # then adjusted by eye. Not a physical ColorChecker solve; a second illuminant is still to do.
+  - Ccm:
+      ccms:
+        - ct: 6500
+          ccm: [  1.642, -0.398, -0.166,
+                 -0.330,  1.441, -0.143,
+                 -0.119, -0.531,  1.611 ]
+  - Adjust:
+  - Agc:
+      AeConstraintMode:
+        Normal:
+          # Highlight guard (replaces 0.7.2 patch 0005 / the exposureValue -0.75 fix for pink clipped whites).
+          upper:
+            qLo: 0.98
+            qHi: 1.0
+            yTarget: 0.90        # TBD: clip % on white fabric in the bright meeting room
+        Highlight:
+          upper:
+            qLo: 0.95
+            qHi: 1.0
+            yTarget: 0.80        # TBD
+      # EV follows light (replaces 0.7.2 patch 0006): brighter target in dim rooms, lower in bright ones.
+      # Needs a softisp Lux algorithm (patchwork 26491); without it lux = 500 and this is a constant.
+      relativeLuminanceTarget: [ 10, 0.27, 100, 0.20, 1000, 0.13 ]   # TBD lux points + targets
+  # TBD: one reference capture with a lux reading (phone lux meter is enough for a first file).
+  # - Lux:
+  #     referenceY: TBD
+  #     referenceExposureTime: TBD   # us
+  #     referenceAnalogueGain: TBD
+  #     referenceDigitalGain: 1.0
+  #     referenceLux: TBD
+...

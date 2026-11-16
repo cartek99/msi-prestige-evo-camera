@@ -1,0 +1,154 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH v2 for 0.7] ipa: simple: awb: Add manual/fixed white balance support
+
+The simple soft-ISP AWB is a pure grey-world estimator: it forces the mean
+of the R, G and B channels to be equal. On scenes whose average is not grey
+- e.g. a webcam that always frames a warm room with skin tones - grey-world
+over-corrects, producing a strong cool/blue cast and desaturating warm
+colours. The AwbEnable and ColourGains controls are advertised by the
+control API but silently ignored by this IPA, so there is no way to escape
+the estimator.
+
+Make the simple AWB honor AwbEnable and ColourGains, and allow a per-sensor
+fixed white balance to be provided in the tuning file as "gains: [red, blue]"
+(green is 1.0). When fixed gains are configured the grey-world estimator is
+bypassed, giving a stable, tunable white balance. AwbEnable=true restores
+auto. Existing tuning files (no "gains" key) keep the previous grey-world
+behaviour.
+
+Signed-off-by: Keith Carter <oss@keithbcarter.com>
+---
+--- a/src/ipa/simple/algorithms/awb.h
++++ b/src/ipa/simple/algorithms/awb.h
+@@ -7,6 +7,8 @@
+ 
+ #pragma once
+ 
++#include "libcamera/internal/vector.h"
++
+ #include "algorithm.h"
+ 
+ namespace libcamera {
+@@ -19,7 +21,12 @@
+ 	Awb() = default;
+ 	~Awb() = default;
+ 
++	int init(IPAContext &context, const ValueNode &tuningData) override;
+ 	int configure(IPAContext &context, const IPAConfigInfo &configInfo) override;
++	void queueRequest(typename Module::Context &context,
++			  const uint32_t frame,
++			  typename Module::FrameContext &frameContext,
++			  const ControlList &controls) override;
+ 	void prepare(IPAContext &context,
+ 		     const uint32_t frame,
+ 		     IPAFrameContext &frameContext,
+@@ -29,6 +36,18 @@
+ 		     IPAFrameContext &frameContext,
+ 		     const SwIspStats *stats,
+ 		     ControlList &metadata) override;
++
++private:
++	/*
++	 * When manual_ is set, the grey-world estimator is bypassed and the
++	 * fixed manualGains_ (red, green=1, blue) are used instead. This lets a
++	 * sensor whose scene content defeats grey-world (e.g. a webcam that
++	 * always frames a warm room) ship a stable, tuned white balance. The
++	 * default can come from the tuning file ("gains: [r, b]") and can be
++	 * overridden at runtime via the AwbEnable / ColourGains controls.
++	 */
++	bool manual_ = false;
++	RGB<float> manualGains_ = { { 1.0f, 1.0f, 1.0f } };
+ };
+ 
+ } /* namespace ipa::soft::algorithms */
+--- a/src/ipa/simple/algorithms/awb.cpp
++++ b/src/ipa/simple/algorithms/awb.cpp
+@@ -23,15 +23,66 @@
+ 
+ namespace ipa::soft::algorithms {
+ 
++int Awb::init(IPAContext &context, const ValueNode &tuningData)
++{
++	/*
++	 * Advertise manual white-balance controls. AwbEnable toggles between
++	 * the grey-world estimator and fixed gains; ColourGains sets the fixed
++	 * [red, blue] gains directly.
++	 */
++	context.ctrlMap[&controls::AwbEnable] = ControlInfo(false, true);
++	context.ctrlMap[&controls::ColourGains] = ControlInfo(0.0f, 32.0f, 1.0f);
++
++	/*
++	 * An optional per-sensor fixed white balance can be provided in the
++	 * tuning file as "gains: [red, blue]" (green is 1.0). When present it
++	 * disables the grey-world estimator by default, giving a stable result
++	 * for this sensor. A runtime AwbEnable=true restores auto.
++	 */
++	const auto &gains = tuningData["gains"].get<std::vector<float>>();
++	if (gains && gains->size() == 2) {
++		manualGains_ = RGB<float>({ (*gains)[0], 1.0f, (*gains)[1] });
++		manual_ = true;
++		LOG(IPASoftAwb, Info)
++			<< "Fixed white-balance gains from tuning file: R "
++			<< manualGains_.r() << " B " << manualGains_.b();
++	}
++
++	return 0;
++}
++
+ int Awb::configure(IPAContext &context,
+ 		   [[maybe_unused]] const IPAConfigInfo &configInfo)
+ {
+ 	auto &gains = context.activeState.awb.gains;
+-	gains = { { 1.0, 1.0, 1.0 } };
++	gains = manual_ ? manualGains_ : RGB<float>{ { 1.0f, 1.0f, 1.0f } };
+ 
+ 	return 0;
+ }
+ 
++void Awb::queueRequest([[maybe_unused]] typename Module::Context &context,
++		       [[maybe_unused]] const uint32_t frame,
++		       [[maybe_unused]] typename Module::FrameContext &frameContext,
++		       const ControlList &controls)
++{
++	const auto &awbEnable = controls.get(controls::AwbEnable);
++	if (awbEnable.has_value()) {
++		manual_ = !awbEnable.value();
++		LOG(IPASoftAwb, Debug)
++			<< (manual_ ? "Manual" : "Auto") << " white balance";
++	}
++
++	const auto &colourGains = controls.get(controls::ColourGains);
++	if (colourGains.has_value()) {
++		const auto &g = colourGains.value();
++		manualGains_ = { { g[0], 1.0f, g[1] } };
++		manual_ = true;
++		LOG(IPASoftAwb, Debug)
++			<< "Setting manual colour gains: R " << manualGains_.r()
++			<< " B " << manualGains_.b();
++	}
++}
++
+ void Awb::prepare(IPAContext &context,
+ 		  [[maybe_unused]] const uint32_t frame,
+ 		  IPAFrameContext &frameContext,
+@@ -59,6 +110,20 @@
+ 		return;
+ 
+ 	/*
++	 * In manual mode, apply the fixed gains and skip the grey-world
++	 * estimator entirely. This gives a stable white balance independent of
++	 * scene content.
++	 */
++	if (manual_) {
++		auto &gains = context.activeState.awb.gains;
++		gains = manualGains_;
++		RGB<double> rgbGains{ { 1.0 / gains.r(), 1.0 / gains.g(), 1.0 / gains.b() } };
++		context.activeState.awb.temperatureK = estimateCCT(rgbGains);
++		metadata.set(controls::ColourTemperature, context.activeState.awb.temperatureK);
++		return;
++	}
++
++	/*
+ 	 * Black level must be subtracted to get the correct AWB ratios, they
+ 	 * would be off if they were computed from the whole brightness range
+ 	 * rather than from the sensor range.

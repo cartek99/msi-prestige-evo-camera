@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: CC0-1.0
+# Look auto-v1 (PLAN M4b): daylight-v1 colour, with the EV following the scene light instead of
+# a fixed exposureValue: -0.50 (daylight-v1) in a bright room, +0.75 (clean-v1) in a dim one.
+# Needs the IPA with patch 0006 (check-cam-stack.sh [9]); the stock/older IPA ignores these keys
+# and runs EV 0. light = log2(median luma above black / (exposure lines x gain)), see the patch.
+# Calibrated 2026-11-16 (tools/ev-light-test.sh): dark room at night -19.7, a room by day -17.3,
+# both with the AGC at its limit (2016 lines x gain 16 = light -15.0 at median 1.0), where EV can't
+# brighten and the picture is the same with either EV. EV only acts once the room is bright enough
+# for the AGC to come off its limit (> -15, e.g. a bright office).
+# An exposureValue: line here would be added to the ramp as an offset (cam-tune's EV knob).
+# sat=1.20 warm=+0.00 tint=+0.00 bright=1.00 strength=0.65 gamma=2.40 contrast=1.10
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  - Ccm:
+      ccms:
+        - ct: 6500
+          ccm: [  1.642, -0.398, -0.166,
+                 -0.330,  1.441, -0.143,
+                 -0.119, -0.531,  1.611 ]
+  - Adjust:
+      gamma: 2.40
+      contrast: 1.10
+  - Agc:
+      exposureValueBright: -0.50
+      exposureValueDark: 0.75
+      lightBright: -15.0
+      lightDark: -17.5
+...

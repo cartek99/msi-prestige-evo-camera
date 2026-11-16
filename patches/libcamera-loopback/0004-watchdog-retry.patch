@@ -1,0 +1,108 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] Stall watchdog, per-open retry of the source, give up on repeated failure
+
+A stream that stops delivering frames (no frame for 3 s, e.g. a GPU hang mid-call)
+now counts as a failure like a pipeline error. A failure restarts the pipeline,
+on the fallback source if the main one failed. Every fresh start (new reader,
+resume) tries the main source again, so a transient failure does not pin the
+fallback until the service restarts. After 4 failures within 60 s the relay
+stops retrying until the next open.
+---
+--- a/libcamera-loopback.py
++++ b/libcamera-loopback.py
+@@ -47,6 +47,8 @@
+ 
+ 
+ FIRST_FRAME_S = 6  # libcamera start + first frame takes ~0.6 s here
++STALL_S = 3        # streaming, then no frame for this long = stalled (patch 0004)
++GIVE_UP = (4, 60)  # this many failures within this many seconds: stop retrying until next open
+ 
+ 
+ def fourcc(s):
+@@ -70,9 +72,16 @@
+         self.frames = 0
+         # Fallback (local patch 0002): if the source chain fails (parse error, pipeline
+         # error, or no frame within FIRST_FRAME_S), switch to LOOPBACK_FALLBACK_SOURCE
+-        # (e.g. the plain camera without GPU filters) until the service restarts, so a
+-        # broken filter driver degrades the picture instead of removing the camera.
++        # (e.g. the plain camera without GPU filters), so a broken filter driver degrades
++        # the picture instead of removing the camera.
++        # Patch 0004: a stall mid-stream (no frame for STALL_S) counts as a failure too; a
++        # failure restarts the pipeline (fallback if the enhanced chain failed); every fresh
++        # start (new reader, resume) tries the enhanced chain again; after GIVE_UP failures
++        # in a row it stops until the next open instead of looping.
++        self.primary = args.source
+         self.source = args.source
++        self.failures = []   # monotonic times of recent failures
++        self.last_frame = 0.0
+         self.fallback = os.environ.get("LOOPBACK_FALLBACK_SOURCE", "").strip()
+         self.stop_timer = 0  # pending delayed stop (GLib source id)
+         self.st = None       # frame timing stats window
+@@ -198,9 +207,11 @@
+         return False
+ 
+     # -- capture pipeline --
+-    def start(self):
++    def start(self, fresh=True):
+         if self.pipeline or self.sleeping:
+             return
++        if fresh:
++            self.source = self.primary
+         desc = (f"{self.source} ! video/x-raw,width={self.w},height={self.h},"
+                 f"framerate={self.fps}/1 ! videoconvert ! videoscale ! "
+                 f"video/x-raw,format={self.pixfmt},width={self.w},height={self.h} ! "
+@@ -220,25 +231,39 @@
+         bus.connect("message::error", self._on_error, self.pipeline)
+         self.frames = 0
+         self.st = None
++        self.last_frame = time.monotonic()
+         self.pipeline.set_state(Gst.State.PLAYING)
+-        GLib.timeout_add_seconds(FIRST_FRAME_S, self._check_first_frame, self.pipeline)
++        GLib.timeout_add(500, self._watchdog, self.pipeline)
+ 
+-    def _check_first_frame(self, p):
+-        if p is self.pipeline and self.frames == 0:
+-            log(f"pipeline error: no frame within {FIRST_FRAME_S}s")
++    def _watchdog(self, p):
++        if p is not self.pipeline:
++            return False  # pipeline stopped or replaced: this timer ends
++        limit = FIRST_FRAME_S if self.frames == 0 else STALL_S
++        if time.monotonic() - self.last_frame > limit:
++            log(f"pipeline error: no frame within {FIRST_FRAME_S}s" if self.frames == 0
++                else f"pipeline error: stalled, no frame for {STALL_S}s after {self.frames} frames")
+             self._on_failure(p)
+-        return False
++            return False
++        return True
+ 
+     def _on_failure(self, p):
+         # p = the pipeline that failed; ignore stale reports about an older one
+         if p is not self.pipeline:
+             return False
+         self.stop()
++        now = time.monotonic()
++        self.failures = [t for t in self.failures if now - t < GIVE_UP[1]] + [now]
++        if len(self.failures) >= GIVE_UP[0]:
++            log(f"giving up: {len(self.failures)} failures in {GIVE_UP[1]}s; next open retries")
++            self.failures = []
++            return False
+         if self.fallback and self.source != self.fallback:
+             log(f"FALLBACK: source failed; using LOOPBACK_FALLBACK_SOURCE: {self.fallback}")
+             self.source = self.fallback
+-            if self.readers and not self.sleeping:
+-                self.start()
++        else:
++            log("restarting the same source")
++        if self.readers and not self.sleeping:
++            self.start(fresh=False)
+         return False
+ 
+     def stop(self):
+@@ -262,6 +287,7 @@
+                 if len(data) >= self.frame_size:
+                     os.write(self.fd, data[: self.frame_size])
+                     self.frames += 1
++                    self.last_frame = time.monotonic()
+             except OSError as e:
+                 log("write failed:", e)
+             finally:

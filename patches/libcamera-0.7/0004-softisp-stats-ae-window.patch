@@ -1,0 +1,176 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] software_isp: centre-weighted AE histogram (LIBCAMERA_SOFTISP_AE_WINDOW)
+
+The soft ISP meters exposure over the whole frame, so a bright lamp or
+window behind a face pulls exposure down and the face goes dark. With
+LIBCAMERA_SOFTISP_AE_WINDOW="x,y,w,h[,weight]" (fractions of the image,
+weight 1-64, default 4) the luma histogram counts samples inside that
+window weight times. The colour sums (white balance) stay unweighted.
+Unset = stock behaviour. Works for the CPU and the GPU (EGL) debayer.
+---
+diff --git a/include/libcamera/internal/software_isp/swstats_cpu.h b/include/libcamera/internal/software_isp/swstats_cpu.h
+index 5518709..deef2ae 100644
+--- a/include/libcamera/internal/software_isp/swstats_cpu.h
++++ b/include/libcamera/internal/software_isp/swstats_cpu.h
+@@ -67,6 +67,7 @@ public:
+ 		    y >= (window_.y + window_.height))
+ 			return;
+ 
++		aeRow_[statsBufferIndex] = y >= aeY0_ && y < aeY1_;
+ 		(this->*stats0_)(src, stats_[statsBufferIndex]);
+ 	}
+ 
+@@ -79,6 +80,7 @@ public:
+ 		    y >= (window_.y + window_.height))
+ 			return;
+ 
++		aeRow_[statsBufferIndex] = y >= aeY0_ && y < aeY1_;
+ 		(this->*stats2_)(src, stats_[statsBufferIndex]);
+ 	}
+ 
+@@ -122,6 +124,22 @@ private:
+ 	unsigned int sumShift_;
+ 
+ 	std::vector<SwIspStats> stats_;
++
++	/*
++	 * Centre-weighted exposure metering (ipu7-cam-fix patch 0004): histogram
++	 * samples inside aeWindow count aeWeight_ times, others once. Colour sums
++	 * (white balance) are not weighted. Set by LIBCAMERA_SOFTISP_AE_WINDOW.
++	 */
++	void setupAeWindow();
++	float aeFrac_[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
++	unsigned int aeWeight_ = 1;
++	unsigned int aeUnitNum_ = 1;
++	unsigned int aeUnitDen_ = 1;
++	unsigned int aeX0_ = 0;
++	unsigned int aeX1_ = 0;
++	unsigned int aeY0_ = 0;
++	unsigned int aeY1_ = 0;
++	std::vector<uint8_t> aeRow_;
+ 	SharedMemObject<SwIspStats> sharedStats_;
+ 	Benchmark bench_;
+ };
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 7fb77ce..9499a10 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -11,7 +11,10 @@
+ 
+ #include "libcamera/internal/software_isp/swstats_cpu.h"
+ 
++#include <stdio.h>
++
+ #include <libcamera/base/log.h>
++#include <libcamera/base/utils.h>
+ 
+ #include <libcamera/stream.h>
+ 
+@@ -177,7 +180,8 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+                                           \
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+-	uint64_t sumB = 0;
++	uint64_t sumB = 0;                \
++	const bool aeRow = aeWeight_ > 1 && aeRow_[&stats - stats_.data()];
+ 
+ #define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+ 	sumR += r;                         \
+@@ -187,7 +191,8 @@ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ 	yVal = r * kRedYMul;               \
+ 	yVal += g * kGreenYMul;            \
+ 	yVal += b * kBlueYMul;             \
+-	stats.yHistogram[yVal * SwIspStats::kYHistogramSize / (256 * 256 * (div))]++;
++	stats.yHistogram[yVal * SwIspStats::kYHistogramSize / (256 * 256 * (div))] += \
++		(aeRow && x >= aeX0_ && x < aeX1_) ? aeWeight_ : 1;
+ 
+ #define SWSTATS_FINISH_LINE_STATS() \
+ 	stats.sum_.r() += sumR;     \
+@@ -469,6 +474,9 @@ int SwStatsCpu::configure(const StreamConfiguration &inputCfg, unsigned int stat
+ {
+ 	stride_ = inputCfg.stride;
+ 	stats_.resize(statsBufferCount);
++	aeRow_.assign(statsBufferCount, 0);
++	aeUnitNum_ = 1;
++	aeUnitDen_ = 1;
+ 
+ 	BayerFormat bayerFormat =
+ 		BayerFormat::fromPixelFormat(inputCfg.pixelFormat);
+@@ -501,6 +509,10 @@ int SwStatsCpu::configure(const StreamConfiguration &inputCfg, unsigned int stat
+ 		else
+ 			patternSize_.width = 2; /* 3 bytes for *2* pixels */
+ 
++		/* The packed line functions loop over bytes, not pixels */
++		aeUnitNum_ = bitDepth == 10 ? 5 : 3;
++		aeUnitDen_ = bitDepth == 10 ? 4 : 2;
++
+ 		patternSize_.height = 2;
+ 
+ 		/* Skip every 3th and 4th line, sample every other 2x2 block */
+@@ -530,6 +542,48 @@ int SwStatsCpu::configure(const StreamConfiguration &inputCfg, unsigned int stat
+ 	return -EINVAL;
+ }
+ 
++/*
++ * Read LIBCAMERA_SOFTISP_AE_WINDOW and compute the centre-weighted AE bounds
++ * for the current window_ (ipu7-cam-fix patch 0004).
++ */
++void SwStatsCpu::setupAeWindow()
++{
++	aeWeight_ = 1;
++	aeY0_ = aeY1_ = 0;
++
++	const char *env = utils::secure_getenv("LIBCAMERA_SOFTISP_AE_WINDOW");
++	if (!env || !*env || window_.width == 0)
++		return;
++
++	float f[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 4.0f };
++	int n = sscanf(env, "%f,%f,%f,%f,%f", &f[0], &f[1], &f[2], &f[3], &f[4]);
++	if (n < 4 || f[0] < 0.0f || f[1] < 0.0f || f[2] <= 0.0f || f[3] <= 0.0f ||
++	    f[0] + f[2] > 1.0f || f[1] + f[3] > 1.0f || f[4] < 1.0f || f[4] > 64.0f) {
++		LOG(SwStatsCpu, Warning)
++			<< "Ignoring invalid LIBCAMERA_SOFTISP_AE_WINDOW '" << env
++			<< "' (want x,y,w,h[,weight] as fractions, weight 1-64)";
++		return;
++	}
++
++	for (unsigned int i = 0; i < 4; i++)
++		aeFrac_[i] = f[i];
++	aeWeight_ = static_cast<unsigned int>(f[4] + 0.5f);
++
++	/* x bounds are relative to window_.x, in the line functions' loop units */
++	unsigned int px0 = static_cast<unsigned int>(f[0] * window_.width);
++	unsigned int px1 = static_cast<unsigned int>((f[0] + f[2]) * window_.width);
++	aeX0_ = px0 * aeUnitNum_ / aeUnitDen_;
++	aeX1_ = px1 * aeUnitNum_ / aeUnitDen_;
++	/* y bounds are in the same coordinates as the y passed to processLine*() */
++	aeY0_ = window_.y + static_cast<unsigned int>(f[1] * window_.height);
++	aeY1_ = window_.y + static_cast<unsigned int>((f[1] + f[3]) * window_.height);
++
++	LOG(SwStatsCpu, Info)
++		<< "Centre-weighted AE: window " << f[0] << "," << f[1] << ","
++		<< f[2] << "," << f[3] << " weight " << aeWeight_
++		<< " (x " << px0 << "-" << px1 << " px, rows " << aeY0_ << "-" << aeY1_ << ")";
++}
++
+ /**
+  * \brief Specify window coordinates over which to gather statistics
+  * \param[in] window The window object.
+@@ -570,6 +624,8 @@ void SwStatsCpu::setWindow(const Rectangle &window)
+ 	window_.width = (window_.width > xShift_ ? window_.width - xShift_ : 0);
+ 	window_.width &= ~(patternSize_.width - 1);
+ 	window_.height &= ~(patternSize_.height - 1);
++
++	setupAeWindow();
+ }
+ 
+ void SwStatsCpu::processBayerFrame2(MappedFrameBuffer &in)
+@@ -589,6 +645,8 @@ void SwStatsCpu::processBayerFrame2(MappedFrameBuffer &in)
+ 		/* linePointers[0] is not used by any stats0_ functions */
+ 		linePointers[1] = src;
+ 		linePointers[2] = src + stride_;
++		/* y is relative to window_.y here; the AE rows are absolute */
++		aeRow_[0] = window_.y + y >= aeY0_ && window_.y + y < aeY1_;
+ 		(this->*stats0_)(linePointers, stats_[0]);
+ 		src += stride_ * 2;
+ 	}

@@ -1,0 +1,11 @@
+# runtime output of the scripts (personal frames, logs, local builds)
+samples/
+data/
+live/
+prebuilt/
+srpm-cache/
+ipa-test/
+*.png
+*.jpg
+*.mkv
+*.so

@@ -1,0 +1,92 @@
+--- a/libcamera-loopback.py
++++ b/libcamera-loopback.py
+@@ -30,7 +30,7 @@
+ import gi
+ 
+ gi.require_version("Gst", "1.0")
+-from gi.repository import GLib, Gst  # noqa: E402
++from gi.repository import Gio, GLib, Gst  # noqa: E402
+ 
+ __version__ = "0.1.0"
+ 
+@@ -67,6 +67,10 @@
+         self.frames = 0
+         self.stop_timer = 0  # pending delayed stop (GLib source id)
+         self.st = None       # frame timing stats window
++        self.readers = 0     # last CLIENT_USAGE count
++        self.sleeping = False
++        self.inhibit_fd = -1
++        self._watch_sleep()
+         self.fd = os.open(args.device, os.O_RDWR)
+         self._set_format()
+         self._write_black()          # makes the device advertise CAPTURE
+@@ -114,6 +118,7 @@
+             pending, = struct.unpack_from("I", ev, 72)
+             if etype == V4L2_EVENT_PRI_CLIENT_USAGE:
+                 log(f"client usage: {count}")
++                self.readers = count
+                 if count:
+                     self._cancel_delayed_stop()
+                     self.start()
+@@ -127,6 +132,52 @@
+                 break
+         return True
+ 
++    # -- suspend: the IPU7 ISYS driver refuses to suspend (-EBUSY) while the
++    # camera streams, so the laptop stays awake with the lid shut. Stop the camera
++    # before sleep (logind delay inhibitor) and restart it on resume if an app
++    # is still reading. Local patch, ipu7-cam-fix 2026-11-10.
++    def _watch_sleep(self):
++        try:
++            self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
++        except GLib.Error as e:
++            log("no system bus, suspend handling off:", e.message)
++            return
++        self.bus.signal_subscribe("org.freedesktop.login1", "org.freedesktop.login1.Manager",
++                                  "PrepareForSleep", "/org/freedesktop/login1", None,
++                                  Gio.DBusSignalFlags.NONE, self._on_prepare_for_sleep)
++        self._inhibit()
++
++    def _inhibit(self):
++        if self.inhibit_fd >= 0:
++            return
++        try:
++            _, fds = self.bus.call_with_unix_fd_list_sync(
++                "org.freedesktop.login1", "/org/freedesktop/login1",
++                "org.freedesktop.login1.Manager", "Inhibit",
++                GLib.Variant("(ssss)", ("sleep", "libcamera-loopback",
++                                        "Stop the camera before suspend", "delay")),
++                GLib.VariantType("(h)"), Gio.DBusCallFlags.NONE, -1, None, None)
++            self.inhibit_fd = fds.steal_fds()[0]
++        except GLib.Error as e:
++            log("sleep inhibitor failed, suspend handling degraded:", e.message)
++
++    def _on_prepare_for_sleep(self, conn, sender, path, iface, signal, params):
++        going = params.unpack()[0]
++        if going:
++            self.sleeping = True
++            was = bool(self.pipeline)
++            self.stop()
++            log(f"suspend: camera {'stopped' if was else 'idle'}")
++            if self.inhibit_fd >= 0:
++                os.close(self.inhibit_fd)
++                self.inhibit_fd = -1
++        else:
++            self.sleeping = False
++            self._inhibit()
++            log(f"resume: {self.readers} reader(s)")
++            if self.readers:
++                self.start()
++
+     def _cancel_delayed_stop(self):
+         if self.stop_timer:
+             GLib.source_remove(self.stop_timer)
+@@ -139,7 +190,7 @@
+ 
+     # -- capture pipeline --
+     def start(self):
+-        if self.pipeline:
++        if self.pipeline or self.sleeping:
+             return
+         desc = (f"{self.a.source} ! video/x-raw,width={self.w},height={self.h},"
+                 f"framerate={self.fps}/1 ! videoconvert ! videoscale ! "

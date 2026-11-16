@@ -1,0 +1,224 @@
+From: keith carter <oss@keithbcarter.com>
+Subject: [PATCH for 0.7] ipa: simple: agc: Let the EV bias follow the scene light
+
+A single exposureValue in the tuning file can't suit both a bright room
+(where a positive bias clips highlights) and a dim one (where a negative
+bias leaves faces dark). Let the tuning file give two EVs and two light
+levels instead:
+
+  exposureValueBright, exposureValueDark, lightBright, lightDark
+
+With all four present, the AGC estimates the scene light every frame as
+log2(median luma above black level / (exposure lines x gain)), smooths it
+(IIR, ~3 s at 30 fps) and ramps the EV bias linearly between the two EVs.
+exposureValue, if also given, is added as an offset. The median is used
+because the mean and the MSV saturate when highlights clip, which would
+make a bright room read darker and push the EV the wrong way; a median in
+the top (bottom) histogram bin is treated as a lower (upper) bound only.
+A 0.1 EV deadband keeps the target from creeping on noise.
+
+Without the four keys nothing changes. A runtime ExposureValue control
+still overrides, and switches the ramp off for the session.
+
+Applies on top of 0001-0003 of this series (the system IPA build).
+
+diff --git a/src/ipa/simple/algorithms/agc.cpp b/src/ipa/simple/algorithms/agc.cpp
+index 85208f0..f3395e3 100644
+--- a/src/ipa/simple/algorithms/agc.cpp
++++ b/src/ipa/simple/algorithms/agc.cpp
+@@ -61,6 +61,15 @@ static constexpr float kExpProportionalGain = 0.04;
+  */
+ static constexpr float kExpMaxStep = 0.15;
+ 
++/*
++ * EV follows light: the per-frame weight of a new light reading (an IIR
++ * filter with a time constant of about 3 s at 30 fps), and the smallest
++ * change of the EV target that is passed on to the AGC (a deadband, so the
++ * exposure doesn't creep on noise in the light reading).
++ */
++static constexpr float kLightAlpha = 1.0f / 90.0f;
++static constexpr float kEvDeadband = 0.1f;
++
+ Agc::Agc()
+ {
+ }
+@@ -87,6 +96,33 @@ int Agc::init(IPAContext &context, const ValueNode &tuningData)
+ 			<< "Default exposure value from tuning file: "
+ 			<< exposureValue_;
+ 
++	auto evBright = tuningData["exposureValueBright"].get<float>();
++	auto evDark = tuningData["exposureValueDark"].get<float>();
++	auto lightBright = tuningData["lightBright"].get<float>();
++	auto lightDark = tuningData["lightDark"].get<float>();
++	if (evBright && evDark && lightBright && lightDark) {
++		if (*lightBright <= *lightDark) {
++			LOG(IPASoftExposure, Warning)
++				<< "EV follows light disabled: lightBright ("
++				<< *lightBright << ") must be above lightDark ("
++				<< *lightDark << ")";
++		} else {
++			evAuto_ = true;
++			evBright_ = *evBright;
++			evDark_ = *evDark;
++			lightBright_ = *lightBright;
++			lightDark_ = *lightDark;
++			evOffset_ = exposureValue_;
++			/* Start between the two until the first light reading. */
++			exposureValue_ = (evBright_ + evDark_) / 2 + evOffset_;
++			LOG(IPASoftExposure, Info)
++				<< "EV follows light: EV " << evBright_
++				<< " at light >= " << lightBright_ << ", EV "
++				<< evDark_ << " at light <= " << lightDark_
++				<< ", offset " << evOffset_;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -98,11 +134,94 @@ void Agc::queueRequest([[maybe_unused]] typename Module::Context &context,
+ 	const auto &exposureValue = controls.get(controls::ExposureValue);
+ 	if (exposureValue.has_value()) {
+ 		exposureValue_ = exposureValue.value();
++		if (evAuto_ && !evOverride_)
++			LOG(IPASoftExposure, Info)
++				<< "ExposureValue control set: EV follows light off";
++		evOverride_ = true;
+ 		LOG(IPASoftExposure, Debug)
+ 			<< "Setting exposure value to " << exposureValue_;
+ 	}
+ }
+ 
++/*
++ * Estimate the scene light from the frame's luma histogram and the exposure
++ * and gain the frame was captured with (processStats() fills the frame
++ * context from the sensor's delayed controls, so they match the frame),
++ * and ramp the EV bias between evDark_ and evBright_ accordingly.
++ *
++ * The estimate uses the median luma above black level, not the mean or the
++ * MSV: both of those saturate when highlights clip, so a bright room with a
++ * window or screen behind the subject would read darker than it is and
++ * push the EV up, clipping it further. The median stays valid while less
++ * than half of the frame clips. When the median itself sits in the top
++ * (or bottom) histogram bin the reading is only a lower (or upper) bound,
++ * so it may only move the estimate in that direction.
++ */
++void Agc::followLight(IPAContext &context, const IPAFrameContext &frameContext,
++		      const SwIspStats *stats)
++{
++	const auto &histogram = stats->yHistogram;
++	constexpr unsigned int kBins = SwIspStats::kYHistogramSize;
++	const unsigned int blIdx = std::min<unsigned int>(
++		context.activeState.blc.level / (256 / kBins), kBins - 2);
++
++	uint64_t total = 0;
++	for (unsigned int i = blIdx; i < kBins; i++)
++		total += histogram[i];
++	const double exposureGain = static_cast<double>(frameContext.sensor.exposure) *
++				    frameContext.sensor.gain;
++	if (total == 0 || exposureGain <= 0.0)
++		return;
++
++	/* Median bin, interpolated linearly inside the bin. */
++	const double half = total / 2.0;
++	double cum = 0.0;
++	unsigned int bin = blIdx;
++	for (; bin < kBins; bin++) {
++		if (cum + histogram[bin] >= half)
++			break;
++		cum += histogram[bin];
++	}
++	bin = std::min(bin, kBins - 1);
++	const double frac = histogram[bin] ? (half - cum) / histogram[bin] : 0.5;
++	const double median = (bin - blIdx + frac) / (kBins - blIdx);
++	if (median <= 0.0)
++		return;
++
++	const float reading = static_cast<float>(std::log2(median / exposureGain));
++	const bool lowerBound = bin >= kBins - 1;
++	const bool upperBound = bin <= blIdx;
++
++	if (!lightValid_) {
++		light_ = reading;
++		lightValid_ = true;
++	} else if (lowerBound) {
++		if (reading > light_)
++			light_ += kLightAlpha * (reading - light_);
++	} else if (upperBound) {
++		if (reading < light_)
++			light_ += kLightAlpha * (reading - light_);
++	} else {
++		light_ += kLightAlpha * (reading - light_);
++	}
++
++	const float t = std::clamp((light_ - lightDark_) / (lightBright_ - lightDark_),
++				   0.0f, 1.0f);
++	const float target = evDark_ + t * (evBright_ - evDark_) + evOffset_;
++	if (std::abs(target - exposureValue_) >= kEvDeadband ||
++	    (lightFrames_ == 0 && target != exposureValue_))
++		exposureValue_ = target;
++
++	if (lightFrames_++ % 30 == 0)
++		LOG(IPASoftExposure, Debug)
++			<< "light " << light_ << " (reading " << reading
++			<< ", median " << median << ", exp "
++			<< frameContext.sensor.exposure << ", gain "
++			<< frameContext.sensor.gain
++			<< (lowerBound ? ", clipped" : upperBound ? ", black" : "")
++			<< ") -> EV " << exposureValue_;
++}
++
+ void Agc::updateExposure(IPAContext &context, IPAFrameContext &frameContext, double exposureMSV)
+ {
+ 	int32_t &exposure = frameContext.sensor.exposure;
+@@ -237,6 +356,10 @@ void Agc::process(IPAContext &context,
+ 	}
+ 
+ 	float exposureMSV = (denom == 0 ? 0 : static_cast<float>(num) / denom);
++
++	if (evAuto_ && !evOverride_)
++		followLight(context, frameContext, stats);
++
+ 	updateExposure(context, frameContext, exposureMSV);
+ }
+ 
+diff --git a/src/ipa/simple/algorithms/agc.h b/src/ipa/simple/algorithms/agc.h
+index 1f52d99..197b04f 100644
+--- a/src/ipa/simple/algorithms/agc.h
++++ b/src/ipa/simple/algorithms/agc.h
+@@ -31,6 +31,8 @@ public:
+ 
+ private:
+ 	void updateExposure(IPAContext &context, IPAFrameContext &frameContext, double exposureMSV);
++	void followLight(IPAContext &context, const IPAFrameContext &frameContext,
++			 const SwIspStats *stats);
+ 
+ 	/*
+ 	 * Exposure Value (EV) bias, in log2 stops, applied on top of the
+@@ -39,6 +41,26 @@ private:
+ 	 * highlights from clipping).
+ 	 */
+ 	float exposureValue_ = 0.0f;
++
++	/*
++	 * "EV follows light": when the tuning file gives all four of
++	 * exposureValueBright, exposureValueDark, lightBright and lightDark,
++	 * the EV bias is ramped between the two EVs according to the scene
++	 * light level, so one tuning suits a bright room and a dim one.
++	 * The tuning-file exposureValue then acts as an offset on the ramp.
++	 * A runtime ExposureValue control switches the ramp off.
++	 */
++	bool evAuto_ = false;
++	bool evOverride_ = false;
++	float evBright_ = 0.0f;
++	float evDark_ = 0.0f;
++	float lightBright_ = 0.0f;
++	float lightDark_ = 0.0f;
++	float evOffset_ = 0.0f;
++	/* Smoothed scene light, log2(median luma / (exposure lines x gain)) */
++	float light_ = 0.0f;
++	bool lightValid_ = false;
++	unsigned int lightFrames_ = 0;
+ };
+ 
+ } /* namespace ipa::soft::algorithms */

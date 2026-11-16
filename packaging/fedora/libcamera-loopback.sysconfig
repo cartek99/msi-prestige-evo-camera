@@ -1,0 +1,32 @@
+# libcamera-loopback settings (Fedora package).
+# After editing:  sudo systemctl restart libcamera-loopback
+#                 systemctl --user restart wireplumber    (as your user)
+
+# Card label of the v4l2loopback device to feed (several: separate with |).
+LOOPBACK_LABEL=Built-in Camera (Enhanced)
+
+# GStreamer source. It can be a chain: the relay adds its own caps, conversion
+# and output after it. Example, pinning a camera and adding GPU denoise:
+#   LOOPBACK_SOURCE='libcamerasrc camera-name=\\_SB_.LNK0 ! vapostproc denoise=40'
+# Camera name escaping (tested 2026-11-10): GStreamer's parser eats one
+# backslash, so it must receive \\_SB_.LNK0. Inside single quotes this file
+# passes backslashes through unchanged; unquoted, each pair becomes one, so the
+# unquoted form needs four. The "starting:" line in journalctl -u
+# libcamera-loopback shows the string GStreamer gets: it must read
+# camera-name=\\_SB_.LNK0. Test with a USB webcam plugged in, since libcamera
+# lists it first and a lost name falls back to it.
+LOOPBACK_SOURCE='libcamerasrc camera-name=\\_SB_.LNK0'
+
+# If LOOPBACK_SOURCE fails (bad element, error, no first frame in 6 s, or a 3 s stall),
+# the relay switches to this source for that stream and logs "FALLBACK:"; the next open
+# tries LOOPBACK_SOURCE again. Keep it to the plain camera.
+LOOPBACK_FALLBACK_SOURCE='libcamerasrc camera-name=\\_SB_.LNK0'
+
+# --width/--height/--fps, --format YUY2|NV12, --linger SECONDS, --stats SECONDS.
+# No spaces inside values: systemd splits this on whitespace.
+LOOPBACK_ARGS=--width 1920 --height 1080 --fps 30 --format YUY2 --linger 10 --stats 10
+
+# Uses Fedora's libcamera. For a private libcamera build, set LD_LIBRARY_PATH,
+# GST_PLUGIN_PATH_1_0 and LIBCAMERA_IPA_MODULE_PATH here.
+GST_REGISTRY_1_0=/var/cache/libcamera-loopback/gst-registry.bin
+LIBCAMERA_LOG_LEVELS=*:WARN

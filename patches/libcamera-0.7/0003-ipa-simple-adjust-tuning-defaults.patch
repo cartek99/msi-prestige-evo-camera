@@ -1,0 +1,79 @@
+diff -ru a/src/ipa/simple/algorithms/adjust.cpp b/src/ipa/simple/algorithms/adjust.cpp
+--- a/src/ipa/simple/algorithms/adjust.cpp
++++ b/src/ipa/simple/algorithms/adjust.cpp
+@@ -24,24 +24,40 @@
+ 
+ LOG_DEFINE_CATEGORY(IPASoftAdjust)
+ 
+-int Adjust::init(IPAContext &context, [[maybe_unused]] const ValueNode &tuningData)
++int Adjust::init(IPAContext &context, const ValueNode &tuningData)
+ {
++	/*
++	 * Optional per-sensor defaults. Applications that never set the
++	 * Gamma/Contrast/Saturation controls (e.g. PipeWire consumers) would
++	 * otherwise always get the hardcoded defaults.
++	 */
++	defaultGamma_ = tuningData["gamma"].get<float>(kDefaultGamma);
++	if (tuningData.contains("contrast"))
++		defaultContrast_ = tuningData["contrast"].get<float>(kDefaultContrast);
++	if (tuningData.contains("saturation") && context.ccmEnabled)
++		defaultSaturation_ = tuningData["saturation"].get<float>(kDefaultSaturation);
++
++	LOG(IPASoftAdjust, Info)
++		<< "Adjust defaults from tuning file: gamma " << defaultGamma_
++		<< " contrast " << defaultContrast_.value_or(kDefaultContrast)
++		<< " saturation " << defaultSaturation_.value_or(kDefaultSaturation);
++
+ 	context.ctrlMap[&controls::Gamma] =
+-		ControlInfo(0.1f, 10.0f, kDefaultGamma);
++		ControlInfo(0.1f, 10.0f, defaultGamma_);
+ 	context.ctrlMap[&controls::Contrast] =
+-		ControlInfo(0.0f, 2.0f, kDefaultContrast);
++		ControlInfo(0.0f, 2.0f, defaultContrast_.value_or(kDefaultContrast));
+ 	if (context.ccmEnabled)
+ 		context.ctrlMap[&controls::Saturation] =
+-			ControlInfo(0.0f, 2.0f, kDefaultSaturation);
++			ControlInfo(0.0f, 2.0f, defaultSaturation_.value_or(kDefaultSaturation));
+ 	return 0;
+ }
+ 
+ int Adjust::configure(IPAContext &context,
+ 		      [[maybe_unused]] const IPAConfigInfo &configInfo)
+ {
+-	context.activeState.knobs.gamma = kDefaultGamma;
+-	context.activeState.knobs.contrast = std::optional<float>();
+-	context.activeState.knobs.saturation = std::optional<float>();
++	context.activeState.knobs.gamma = defaultGamma_;
++	context.activeState.knobs.contrast = defaultContrast_;
++	context.activeState.knobs.saturation = defaultSaturation_;
+ 
+ 	return 0;
+ }
+diff -ru a/src/ipa/simple/algorithms/adjust.h b/src/ipa/simple/algorithms/adjust.h
+--- a/src/ipa/simple/algorithms/adjust.h
++++ b/src/ipa/simple/algorithms/adjust.h
+@@ -7,6 +7,8 @@
+ 
+ #pragma once
+ 
++#include <optional>
++
+ #include "libcamera/internal/matrix.h"
+ 
+ #include <libipa/interpolator.h>
+@@ -43,6 +45,15 @@
+ 
+ private:
+ 	void applySaturation(Matrix<float, 3, 3> &ccm, float saturation);
++
++	/*
++	 * Per-sensor defaults from the tuning file, used whenever the
++	 * application does not set the corresponding control. Unset values
++	 * keep the stock behaviour.
++	 */
++	float defaultGamma_ = kDefaultGamma;
++	std::optional<float> defaultContrast_;
++	std::optional<float> defaultSaturation_;
+ };
+ 
+ } /* namespace ipa::soft::algorithms */

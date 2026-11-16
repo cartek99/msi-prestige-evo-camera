@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: CC0-1.0
+# Hand-tuned soft-ISP file for the OV5675 in the MSI Prestige 13 AI+ Evo A2VMG.
+# Master copy: ~/ipu7-cam-fix/ov5675.yaml — installed to
+# /usr/share/libcamera/ipa/simple/ov5675.yaml by apply-tuning.sh.
+#
+# Why: without a per-sensor file the soft ISP runs "uncalibrated" (no CCM),
+# giving a washed-out image with a green cast on whites.
+#
+# Tuning method: capture settled frames (iterate-ccm.sh + LIBCAMERA_IPA_CONFIG_PATH)
+# and inspect visually against a factory-tuned reference camera.
+#
+# Tuning log (2026-07-06):
+#   v1: generic OmniVision guess (diag 1.65-1.70, rows=1.0) → cyan cast.
+#   v2: R row 1.15 → much better, residual green midtones.
+#   v3: G row 0.90 → overshot magenta.
+#   v4: R 1.10 / G 0.96 / B 0.95 → good skin/walls; shipped interim.
+#   v5: +8% strength, warmer → best saturation, worst highlight mottle.
+#   v6: equal row sums, strong → PROVED mottle scales with matrix strength,
+#       not row sums (walls went cool again; mottle persisted).
+#   v7/v8: medium strength → pink shirt persists.
+#   v9: v4 ratios at ~90% of v4 strength → FINAL. Natural skin, neutral-warm
+#       walls, faintest highlight mottle of the series.
+#   v10: v9 +50% sat recovery → mottle returned; rejected.
+#
+# Highlight clipping FIX (2026-07-07): the pink mottle on bright white fabric
+# was AGC over-exposure — the simple IPA drove the histogram MSV to the middle
+# of the range (kExposureOptimal), clipping highlights (measured mean ~0.60,
+# 6-11% of pixels clipped). It was NOT fixable via the CCM (proven v5-v10) and
+# the AGC target was hardcoded with no runtime knob. Fixed by patching the
+# simple AGC to honor the ExposureValue control + a per-sensor tuning default
+# (see patches/0001-ipa-simple-agc-exposure-value.patch, installed by
+# apply-ipa-agc-patch.sh). With exposureValue: -0.75 the image settles at
+# mean ~0.41 with ZERO clipping and the mottle is gone (before/after captures
+# in the project notes). Tunable: raise toward -0.5 for a brighter image, lower
+# toward -1.0 for maximum highlight protection. Requires the patched
+# ipa_soft_simple.so — check-cam-stack.sh [9] verifies it.
+# White-balance FIX (2026-07-07): the stock simple IPA AWB is pure grey-world,
+# which over-corrects this warm scene → strong cyan cast that also washed out
+# the (pink) shirt. Replaced with FIXED gains (needs the patched IPA / AWB patch
+# 0002). gains: [red, blue], green=1.0. R1.25/B1.30 neutralises the wall to the
+# phone reference (R/G 1.00 vs 1.01). INTERIM: the CCM below is still the old v9
+# (hand-tuned under the broken WB) so colour accuracy — esp. the pink shirt — is
+# not yet right. Proper CCM pending a ColorChecker solve (see CALIBRATION.md +
+# tools/colorchecker-fit.py). Set AwbEnable=true at runtime to fall back to auto.
+#   2026-11-09 cam-tune: sat=1.20 warm=+0.08 tint=+0.02 bright=1.00 strength=0.65 ev=+0.75 gamma=2.40 contrast=1.10 — clean-v1: night, front light — low-noise look approved 2026-11-09
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+      # 2026-10-26: these 0.5.2-era gains give a yellow-green cast on 0.7.2 (B/G 0.77);
+      # stock 0.7.2 auto-WB looks reasonable. Re-tune (ColorChecker) before re-enabling.
+      # gains: [ 1.25, 1.30 ]
+  - Ccm:
+      ccms:
+        - ct: 6500
+          ccm: [  1.774, -0.430, -0.179,
+                 -0.323,  1.412, -0.140,
+                 -0.110, -0.489,  1.482 ]
+  # libcamera 0.7 renamed Lut -> Adjust. "Lut" on 0.7.x = "Algorithm 'Lut' not found"
+  # -> IPA init failed -> soft ISP disabled (raw, unprocessed image everywhere).
+  - Adjust:
+      gamma: 2.40
+      contrast: 1.10
+  - Agc:
+      exposureValue: 0.75
+...

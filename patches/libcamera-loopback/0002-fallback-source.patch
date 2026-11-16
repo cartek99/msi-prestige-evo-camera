@@ -1,0 +1,97 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] Fall back to LOOPBACK_FALLBACK_SOURCE when the source chain fails
+
+If the source pipeline fails to parse, posts an error, or delivers no frame
+within 6 s, switch to the source in LOOPBACK_FALLBACK_SOURCE (if set) until the
+service restarts. A broken GPU filter driver then degrades the picture instead
+of removing the camera. Logs "FALLBACK:" so health checks can flag it.
+---
+diff --git a/libcamera-loopback.py b/libcamera-loopback.py
+index 16b102a..90cd5d9 100755
+--- a/libcamera-loopback.py
++++ b/libcamera-loopback.py
+@@ -46,6 +46,9 @@ V4L2_EVENT_SUB_FL_SEND_INITIAL = 1
+ V4L2_EVENT_PRI_CLIENT_USAGE = 0x08000000 + 0x08E00000 + 1
+ 
+ 
++FIRST_FRAME_S = 6  # libcamera start + first frame takes ~0.6 s here
++
++
+ def fourcc(s):
+     return s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24)
+ 
+@@ -65,6 +68,12 @@ class Relay:
+             self.frame_size, self.bpl = self.w * self.h * 3 // 2, self.w
+         self.pipeline = None
+         self.frames = 0
++        # Fallback (local patch 0002): if the source chain fails (parse error, pipeline
++        # error, or no frame within FIRST_FRAME_S), switch to LOOPBACK_FALLBACK_SOURCE
++        # (e.g. the plain camera without GPU filters) until the service restarts, so a
++        # broken filter driver degrades the picture instead of removing the camera.
++        self.source = args.source
++        self.fallback = os.environ.get("LOOPBACK_FALLBACK_SOURCE", "").strip()
+         self.stop_timer = 0  # pending delayed stop (GLib source id)
+         self.st = None       # frame timing stats window
+         self.readers = 0     # last CLIENT_USAGE count
+@@ -192,20 +201,45 @@ class Relay:
+     def start(self):
+         if self.pipeline or self.sleeping:
+             return
+-        desc = (f"{self.a.source} ! video/x-raw,width={self.w},height={self.h},"
++        desc = (f"{self.source} ! video/x-raw,width={self.w},height={self.h},"
+                 f"framerate={self.fps}/1 ! videoconvert ! videoscale ! "
+                 f"video/x-raw,format={self.pixfmt},width={self.w},height={self.h} ! "
+                 "queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+                 "appsink name=sink emit-signals=true max-buffers=2 drop=true sync=false")
+         log("starting:", desc)
+-        self.pipeline = Gst.parse_launch(desc)
++        try:
++            self.pipeline = Gst.parse_launch(desc)
++        except GLib.Error as e:
++            log("pipeline error:", e.message)
++            self.pipeline = None
++            self._on_failure(None)
++            return
+         self.pipeline.get_by_name("sink").connect("new-sample", self._on_sample)
+         bus = self.pipeline.get_bus()
+         bus.add_signal_watch()
+-        bus.connect("message::error", self._on_error)
++        bus.connect("message::error", self._on_error, self.pipeline)
+         self.frames = 0
+         self.st = None
+         self.pipeline.set_state(Gst.State.PLAYING)
++        GLib.timeout_add_seconds(FIRST_FRAME_S, self._check_first_frame, self.pipeline)
++
++    def _check_first_frame(self, p):
++        if p is self.pipeline and self.frames == 0:
++            log(f"pipeline error: no frame within {FIRST_FRAME_S}s")
++            self._on_failure(p)
++        return False
++
++    def _on_failure(self, p):
++        # p = the pipeline that failed; ignore stale reports about an older one
++        if p is not self.pipeline:
++            return False
++        self.stop()
++        if self.fallback and self.source != self.fallback:
++            log(f"FALLBACK: source failed; using LOOPBACK_FALLBACK_SOURCE: {self.fallback}")
++            self.source = self.fallback
++            if self.readers and not self.sleeping:
++                self.start()
++        return False
+ 
+     def stop(self):
+         self._cancel_delayed_stop()
+@@ -260,10 +294,10 @@ class Relay:
+                 f"write callback max {1000*s['cb_max']:.1f} ms")
+             self.st = {**s, "t_log": t1, "n": 0, "late": 0, "max_gap": 0.0, "cb_max": 0.0}
+ 
+-    def _on_error(self, bus, msg):
++    def _on_error(self, bus, msg, p):
+         err, dbg = msg.parse_error()
+         log("pipeline error:", err.message, "|", dbg)
+-        GLib.idle_add(self.stop)
++        GLib.idle_add(self._on_failure, p)
+ 
+ 
+ def main():

@@ -1,0 +1,92 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] ipa: simple: agc: highlight guard (tuning highlightGuard/highlightLevel)
+
+When more than highlightGuard of the (metered) histogram is at raw luma
+>= highlightLevel (default 0.90), do not raise exposure; above 3x, lower
+it. Off by default (highlightGuard 0). Protects white fabric from the
+clipped-highlight pink cast when centre-weighted metering raises exposure.
+---
+diff --git a/src/ipa/simple/algorithms/agc.cpp b/src/ipa/simple/algorithms/agc.cpp
+index 85208f0..d006a69 100644
+--- a/src/ipa/simple/algorithms/agc.cpp
++++ b/src/ipa/simple/algorithms/agc.cpp
+@@ -82,6 +82,13 @@ int Agc::init(IPAContext &context, const ValueNode &tuningData)
+ 	 * runtime ExposureValue control still overrides it.
+ 	 */
+ 	exposureValue_ = tuningData["exposureValue"].get<float>(0.0f);
++	highlightGuard_ = std::clamp(tuningData["highlightGuard"].get<float>(0.0f), 0.0f, 0.5f);
++	highlightLevel_ = std::clamp(tuningData["highlightLevel"].get<float>(0.90f), 0.5f, 1.0f);
++	if (highlightGuard_ > 0.0f)
++		LOG(IPASoftExposure, Info)
++			<< "Highlight guard: hold exposure above "
++			<< highlightGuard_ * 100.0f << "% of pixels at raw luma >= "
++			<< highlightLevel_;
+ 	if (exposureValue_ != 0.0f)
+ 		LOG(IPASoftExposure, Info)
+ 			<< "Default exposure value from tuning file: "
+@@ -119,6 +126,13 @@ void Agc::updateExposure(IPAContext &context, IPAFrameContext &frameContext, dou
+ 
+ 	double error = exposureOptimal - exposureMSV;
+ 
++	if (highlightGuard_ > 0.0f) {
++		if (highlightFrac_ > 3.0f * highlightGuard_)
++			error = std::min(error, -2.0 * kExposureSatisfactory);
++		else if (highlightFrac_ > highlightGuard_)
++			error = std::min(error, 0.0);
++	}
++
+ 	if (std::abs(error) <= kExposureSatisfactory)
+ 		return;
+ 
+@@ -166,7 +180,7 @@ void Agc::updateExposure(IPAContext &context, IPAFrameContext &frameContext, dou
+ 	context.activeState.agc.again = again;
+ 
+ 	LOG(IPASoftExposure, Debug)
+-		<< "exposureMSV " << exposureMSV
++		<< "exposureMSV " << exposureMSV << " highlights " << highlightFrac_
+ 		<< " error " << error << " factor " << factor
+ 		<< " exp " << exposure << " again " << again;
+ }
+@@ -237,6 +251,19 @@ void Agc::process(IPAContext &context,
+ 	}
+ 
+ 	float exposureMSV = (denom == 0 ? 0 : static_cast<float>(num) / denom);
++
++	/* Share of the histogram at raw luma >= highlightLevel_ */
++	const unsigned int topBin = std::min<unsigned int>(
++		SwIspStats::kYHistogramSize - 1,
++		static_cast<unsigned int>(highlightLevel_ * SwIspStats::kYHistogramSize));
++	uint64_t total = 0, top = 0;
++	for (unsigned int i = 0; i < SwIspStats::kYHistogramSize; i++) {
++		total += histogram[i];
++		if (i >= topBin)
++			top += histogram[i];
++	}
++	highlightFrac_ = total ? static_cast<float>(top) / total : 0.0f;
++
+ 	updateExposure(context, frameContext, exposureMSV);
+ }
+ 
+diff --git a/src/ipa/simple/algorithms/agc.h b/src/ipa/simple/algorithms/agc.h
+index 1f52d99..5a75239 100644
+--- a/src/ipa/simple/algorithms/agc.h
++++ b/src/ipa/simple/algorithms/agc.h
+@@ -39,6 +39,18 @@ private:
+ 	 * highlights from clipping).
+ 	 */
+ 	float exposureValue_ = 0.0f;
++
++	/*
++	 * Highlight guard (ipu7-cam-fix patch 0005): if more than this fraction
++	 * of the (metered) histogram sits in the top bins, exposure is not
++	 * raised, and above 3x this fraction it is lowered. 0 disables it.
++	 * Protects white fabric from the clipped-highlight pink cast when
++	 * centre-weighted metering pushes exposure up for a face.
++	 */
++	float highlightGuard_ = 0.0f;
++	/* Raw luma (before white balance gains) that counts as near-clipped */
++	float highlightLevel_ = 0.90f;
++	float highlightFrac_ = 0.0f;
+ };
+ 
+ } /* namespace ipa::soft::algorithms */

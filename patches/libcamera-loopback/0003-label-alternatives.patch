@@ -1,0 +1,27 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] --label accepts several labels separated by |
+
+Lets a card label be renamed without a window where the relay cannot find
+its device (the module keeps the old label until it is reloaded).
+---
+--- a/libcamera-loopback.py
++++ b/libcamera-loopback.py
+@@ -315,7 +315,8 @@
+                    help='GStreamer source, e.g. "videotestsrc is-live=true" for testing')
+     p.add_argument("--stats", type=float, default=0,
+                    help="log frame-timing stats every N seconds while streaming (0 = off)")
+-    p.add_argument("--label", help='find the loopback device by card label, e.g. "Intel MIPI Camera"')
++    p.add_argument("--label", help='find the loopback device by card label, e.g. "Intel MIPI Camera"; '
++                   'several labels separated by | (first device matching any of them)')
+     args = p.parse_args()
+     if not args.source:  # e.g. an empty LOOPBACK_SOURCE in /etc/default/libcamera-loopback
+         args.source = "libcamerasrc"
+@@ -324,7 +325,7 @@
+         for d in sorted(os.listdir(base)):
+             try:
+                 with open(f"{base}/{d}/name") as f:
+-                    if f.read().strip() == args.label:
++                    if f.read().strip() in args.label.split("|"):
+                         args.device = f"/dev/{d}"
+                         break
+             except OSError:
