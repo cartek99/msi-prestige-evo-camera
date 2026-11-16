@@ -179,10 +179,15 @@ done
 if [ $((NEW_ON + OLD_ON)) -eq 2 ]; then
     bad "libcamera-loopback AND v4l2-relayd both enabled (the v4l2-relayd generator re-creates instances at boot) → sudo systemctl disable v4l2-relayd.service; sudo systemctl stop v4l2-relayd@libcamerasrc"
 elif [ $((NEW_ON + OLD_ON)) -eq 0 ]; then
-    warn "no relay enabled (fine during the step-R hand run; otherwise Teams/Chrome has no camera)"
+    if rpm -q libcamera-loopback &>/dev/null; then
+        bad "libcamera-loopback installed but NOT enabled → camera gone after the next reboot → sudo systemctl enable --now libcamera-loopback"
+    else
+        warn "no relay enabled (fine during the step-R hand run; otherwise Teams/Chrome has no camera)"
+    fi
 fi
 
-if [ "$NEW_ON" -eq 1 ]; then
+# Judge libcamera-loopback whenever its package is installed (enabled or not); the old relay only without it.
+if [ "$NEW_ON" -eq 1 ] || rpm -q libcamera-loopback &>/dev/null; then
     say "[8] Teams/Chrome path: libcamera-loopback feeding '$LBLABEL'"
     systemctl is-active --quiet libcamera-loopback \
         && ok "libcamera-loopback active (camera starts only while an app reads)" \

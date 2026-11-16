@@ -44,6 +44,7 @@ cp packaging/fedora/*.sysconfig packaging/fedora/*.conf packaging/fedora/*.patch
 spectool -g -R packaging/fedora/libcamera-loopback.spec
 rpmbuild -ba packaging/fedora/libcamera-loopback.spec
 sudo dnf install ~/rpmbuild/RPMS/noarch/libcamera-loopback-*.noarch.rpm
+sudo systemctl enable --now libcamera-loopback   # Fedora leaves new services off; without this the camera is gone after a reboot
 # 3. Patched soft-ISP module, built from Fedora's source package
 bash build-ipa-patch.sh
 sudo bash apply-ipa-agc-patch.sh        # refuses on a different libcamera build; briefly opens the camera to verify
