@@ -1,0 +1,4 @@
+# cam --script: lock 30 fps like libcamerasrc with framerate=30/1 (FrameDurationLimits in us)
+frames:
+  - 0:
+      FrameDurationLimits: [ 33333, 33333 ]
