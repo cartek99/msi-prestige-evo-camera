@@ -25,12 +25,21 @@ tuning file in `upstream/` and the plan in `docs/UPSTREAM.md`, which is being se
 - Works in Chrome, Teams, Zoom and GNOME Snapshot, survives suspend, and falls back to the plain camera if the GPU chain fails.
 
 ## Install (Fedora 45, libcamera 0.7.2)
-Prerequisites: `v4l2loopback` 0.13 or later (akmod from RPM Fusion), `sudo dnf builddep libcamera`,
-`sudo dnf install rpmdevtools`. Clone to `~/ipu7-cam-fix` (messages assume that path), then:
+Prerequisites: `v4l2loopback` 0.13 or later, which is in RPM Fusion (not in Fedora), plus build tools.
+Clone to `~/ipu7-cam-fix` (messages assume that path):
+```
+sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+sudo dnf install akmod-v4l2loopback rpmdevtools   # akmod builds the module for your kernel (Secure Boot: enrol the akmods key)
+sudo dnf builddep libcamera
+git clone https://github.com/cartek99/msi-prestige-evo-camera ~/ipu7-cam-fix
+cd ~/ipu7-cam-fix
+```
+Then:
 ```
 # 1. Pin libcamera first: an update replaces the patched module
 sudo dnf versionlock add libcamera libcamera-ipa libcamera-gstreamer
 # 2. Relay RPM
+rpmdev-setuptree                        # creates ~/rpmbuild/{SOURCES,SPECS,...}
 cp packaging/fedora/*.sysconfig packaging/fedora/*.conf packaging/fedora/*.patch ~/rpmbuild/SOURCES/
 spectool -g -R packaging/fedora/libcamera-loopback.spec
 rpmbuild -ba packaging/fedora/libcamera-loopback.spec

@@ -71,4 +71,5 @@ else
     echo "    LIBCAMERA_LOG_LEVELS=IPASoftExposure:INFO gst-launch-1.0 libcamerasrc ! fakesink num-buffers=15"
 fi
 echo "Done. To revert to stock: sudo cp -a $BAK $SO; sudo cp -a $BAK.sign $SO.sign (then sudo systemctl restart libcamera-loopback)"
-echo "Previous patched IPA (0001-0003): $REPO/prebuilt/ipa_soft_simple.so.0001-0003-0.7.2-3.fc45"
+OLD="$REPO/prebuilt/ipa_soft_simple.so.0001-0003-0.7.2-3.fc45"
+[ -f "$OLD" ] && echo "Previous patched IPA (0001-0003): $OLD" || true
