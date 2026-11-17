@@ -97,7 +97,10 @@ Notes:
     does for 30 fps, keeps 30 fps and raises the gain instead.
     
     I prepared this patch with help from an AI assistant (Claude Code). The
-    testing and the measurements are my own, on my own laptop.
+    testing and the measurements are my own, on my own laptop. I have read
+    the proposed AI policy (patchwork 28765). If it rules this patch out, I
+    understand; the steps above and in the repository are enough to redo
+    the file by hand.
 
  src/ipa/softisp/data/meson.build |   1 +
  src/ipa/softisp/data/ov5675.yaml | 448 +++++++++++++++++++++++++++++++
