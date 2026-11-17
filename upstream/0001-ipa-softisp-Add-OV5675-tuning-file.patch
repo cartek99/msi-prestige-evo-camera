@@ -55,6 +55,24 @@ Notes:
     - in a dim room the stronger matrices and the edge gains make chroma
       noise more visible, as expected without a denoiser
     
+    What I tried before settling on this file (16-17 November 2026):
+    
+    - 16 Nov: a single daylight CCM fitted to a colour chart shown on a
+      phone screen. Colour was fine in daylight, but cold under warm lamps,
+      and the corners stayed dark. Replaced by the vendor calibration.
+    - 16 Nov: the full vendor lens shading tables, at 100% and at 70%.
+      Under the warm LED lamp the low colour temperature tables, through
+      their strong matrices, turned the edges of the image yellow.
+    - 16 Nov: bayes AWB with the default transverse range of 0.01. The LED
+      lamp sits 0.044 off the colour temperature curve towards green, so the
+      picture kept a yellow-green cast; transverseNeg 0.05 removes it.
+    - 17 Nov: a raw flat field (white paper over the lens, cam with a raw
+      stream). The colour shading it needs at the edges (R/G +4 to +11%,
+      B/G -2 to -6%) matches the daylight table of the blob, which confirms
+      the module (BCAB65, not S5VM17) and the channel order. The vendor
+      colour shading is right in daylight; I left it out for the LED case
+      above. Colour shading from the daylight table alone could follow.
+    
     The colour matrices and white points were read with Javier Tia's AIQB
     parser (series 5948), which handles this Lunar Lake blob unchanged. I
     decoded the lens shading record (id 28) following ia_cmc_types.h from
