@@ -76,8 +76,11 @@ Notes:
     The colour matrices and white points were read with Javier Tia's AIQB
     parser (series 5948), which handles this Lunar Lake blob unchanged. I
     decoded the lens shading record (id 28) following ia_cmc_types.h from
-    intel/ipu7-camera-bins. I can post the script that writes this file if
-    that is useful. The numbers come from a vendor calibration blob, as in
+    intel/ipu7-camera-bins. The script that writes this file, the test
+    tools and the dated steps are public:
+    https://github.com/cartek99/msi-prestige-evo-camera
+    (tools/aiqb-to-softisp.py, docs/UPSTREAM.md). The numbers come from a
+    vendor calibration blob, as in
     the OV2740 and Surface Pro 8 tuning files posted earlier; if that is a
     problem for a CC0 data file, please let me know.
     
