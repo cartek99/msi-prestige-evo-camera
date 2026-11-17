@@ -4,9 +4,10 @@
 #   sudo bash install-cam-tools.sh          install / update from this repo (re-run after edits)
 #   sudo bash install-cam-tools.sh remove   uninstall
 # Installs to /usr/local/lib/ipu7-cam/ (scripts, WirePlumber rules, looks/) plus commands
-#   sudo cam-enhance [raw|v64|v64x2|selftest]     cam-enhance          (status)
-#   sudo cam-look day|night                       cam-wp-rule enhanced|native   (as you)
-#   sudo cam-ae on|off                            cam-ae               (status)
+#   sudo cam-enhance raw|v64|v64x2|v64i|v64x2i|selftest   cam-enhance          (status)
+#   sudo cam-look auto|day|night|NAME                     cam-look             (status)
+#   cam-wp-rule enhanced|native   (as you)               sudo cam-ae on|off   (parked, PLAN M3)
+# looks/*.yaml and shaders/*.frag are copied too, since cam-look and the v64i/v64x2i chains read them.
 # Also installs the private libcamera (PLAN M3) from ~/.cache/ipu7-cam/lc-build/stage to
 # /opt/libcamera-ae (root-owned) when a staged build exists and differs from the installed one.
 # The repo scripts keep working as before; prefer the installed commands with sudo.

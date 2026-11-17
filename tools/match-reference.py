@@ -28,18 +28,21 @@ def mv(m, v):
 
 
 def contrast(x, c):
+    """Soft-ISP contrast curve: an S-curve around 0.5 with exponent tan(c*pi/4) (c = 1 is identity)."""
     e = math.tan(min(max(c * math.pi / 4, 0), math.pi / 2 - 1e-5))
     x = min(max(x, 0.0), 1.0)
     return 0.5 * (x / 0.5) ** e if x < 0.5 else 1 - 0.5 * ((1 - x) / 0.5) ** e
 
 
 def _inv(y, c):
+    """Inverse of contrast(): maps a contrast-curved value back to the linear domain."""
     e = math.tan(min(max(c * math.pi / 4, 1e-5), math.pi / 2 - 1e-5))
     y = min(max(y, 0.0), 1.0)
     return 0.5 * (y / 0.5) ** (1 / e) if y < 0.5 else 1 - 0.5 * ((1 - y) / 0.5) ** (1 / e)
 
 
 def to_linear(rgb8, p):
+    """Undo the current gamma and contrast of an 8-bit RGB triple: back to linear light."""
     return [_inv((v / 255) ** p["GAMMA"], p["CONTRAST"]) for v in rgb8]
 
 
@@ -99,6 +102,9 @@ def main():
     clip0 = sum(1 for v in small.get_flattened_data() if max(v) >= 250) / len(px)
 
     def cost(q):
+        """Fit objective: weighted mean squared RGB error over the matched regions, plus a steep
+        penalty if the candidate clips more than 1% more pixels than the current frame.
+        """
         e = sum(w * sum((x - y) ** 2 for x, y in zip(rv, render(lin, p0, q)))
                 for _, rv, _, lin, w in pairs) / sum(w for *_, w in pairs) / 3
         clip = sum(1 for l in px[::3] if max(render(l, p0, q)) >= 250) / len(px[::3])

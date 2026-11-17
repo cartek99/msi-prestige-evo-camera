@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: PARKED — builds the private libcamera of PLAN M3 (off since 2026-11-11). See README.md.
 # build-libcamera-private.sh — build the private libcamera for the relay (PLAN M3). No sudo.
 #   bash build-libcamera-private.sh          build + stage into ~/.cache/ipu7-cam/lc-build/stage
 #   sudo bash install-cam-tools.sh           then copies the staged tree to /opt/libcamera-ae

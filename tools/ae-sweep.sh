@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: PARKED — PLAN M3 metering sweep (off since 2026-11-11). See README.md.
 # ae-sweep.sh — record the M3 metering options with the private libcamera (relay must be idle). No sudo.
 #   bash tools/ae-sweep.sh LABEL [LIBDIR]
 # LIBDIR = private libcamera root (default: the staged build, else /opt/libcamera-ae).

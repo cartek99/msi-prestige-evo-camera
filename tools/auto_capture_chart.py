@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# STATUS: HISTORICAL — helper of auto-capture-chart.sh (libcamera 0.5 era). See README.md.
 """
 auto_capture_chart.py — hands-off color-target capture.
 

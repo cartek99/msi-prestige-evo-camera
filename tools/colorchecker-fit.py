@@ -31,6 +31,7 @@ REF_SRGB = np.array([
 GREY_IDX = [18, 19, 20, 21, 22, 23]  # patches 19..24 (white..black)
 
 def srgb_to_linear(c):
+    """Inverse sRGB transfer: 8-bit sRGB reference values to linear light, for the fit target."""
     c = c / 255.0
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
@@ -39,6 +40,7 @@ def linear_to_srgb(c):
     return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055) * 255
 
 def parse_corner(s, w, h):
+    """Parse "x,y" in pixels or in 0..1 fractions of the image (fractions are scaled to pixels)."""
     x, y = (float(v) for v in s.split(","))
     if 0 <= x <= 1 and 0 <= y <= 1:
         x, y = x * w, y * h
@@ -71,6 +73,12 @@ def sample(img, centers, frac=0.35):
     return np.array(out)
 
 def main():
+    """Solve white-balance gains and a CCM from one identity-CCM capture of the chart.
+
+    Steps: sample the 24 patches, undo the soft-ISP gamma (square), set the gains so the grey
+    row is neutral (green = 1), least-squares fit a 3x3 matrix from the balanced camera RGB to
+    the linear sRGB reference, then normalise each row to sum to 1 so white stays white.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("capture")
     ap.add_argument("--corners", required=True,

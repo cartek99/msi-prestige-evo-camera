@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: HISTORICAL — v4l2-relayd era; for frames now use grab-direct.sh or tools/upstream-ab.sh. See README.md.
 # capture-frame.sh — grab a SETTLED frame from the Teams relay path
 # (/dev/video0) to /tmp/cam-frame.png for color-tuning inspection.
 # v2: single session, 90 frames (~3s) so AGC/AWB settle, keep the LAST frame

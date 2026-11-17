@@ -98,6 +98,9 @@ def temporal_noise(frames, b):
 
 
 def spatial_noise(im, b):
+    """Spatial noise in box b: RMS of (plane - Gaussian blur r=2) for Y and for Cb/Cr (averaged),
+    i.e. the fine-grain texture a single frame carries on a flat patch.
+    """
     res = []
     crop = im.crop(b).convert("YCbCr")
     for ch in range(3):
@@ -110,6 +113,7 @@ def spatial_noise(im, b):
 
 
 def face_lum(im, boxes):
+    """Mean luminance (0..1) over the face boxes."""
     tot = cnt = 0
     for b in boxes:
         d = data(im.crop(b).convert("L"))
@@ -118,12 +122,14 @@ def face_lum(im, boxes):
 
 
 def clip_pct(im):
+    """Percentage of pixels with any channel >= 250 (clipped highlights); halves large frames first."""
     small = im if im.width <= 960 else im.resize((im.width // 2, im.height // 2), Image.NEAREST)
     d = data(small)
     return 100 * sum(1 for p in d if max(p) >= 250) / len(d)
 
 
 def match_rms(ref, frame_im, regions, params):
+    """RMS colour error against the phone reference, via match-reference.py on the matched regions."""
     tmp = "/tmp/cam-metrics-match.png"
     frame_im.save(tmp)
     only = {k: v for k, v in json.load(open(regions)).items() if isinstance(v, dict) and "ref" in v}

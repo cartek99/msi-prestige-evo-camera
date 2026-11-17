@@ -53,6 +53,10 @@ def read_base(path):
 
 
 def final_ccm(p, base):
+    """Compose the final CCM: blend(base, identity, strength), then saturation in YCbCr
+    (BT.601, as libcamera's Adjust does), then the per-row gains bright*(1+warm),
+    bright*(1-tint), bright*(1-warm) for R, G and B.
+    """
     s = p["STRENGTH"]
     ident = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
     m = [[s * base[i][j] + (1 - s) * ident[i][j] for j in range(3)] for i in range(3)]

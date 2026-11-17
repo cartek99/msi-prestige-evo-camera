@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: CC0-1.0
+# Flat-field capture for tools/guided-day-capture.sh: no CCM, no LSC, grey-world AWB, so the
+# shading left in the picture is the sensor + lens only (gamma still applied, undone in analysis).
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  - Adjust:
+  - Agc:
+...

@@ -1,6 +1,8 @@
 #!/bin/bash
 # build-ipa-patch.sh — reproducibly rebuild the patched libcamera "simple" soft
-# ISP IPA (ipa_soft_simple.so) that adds ExposureValue support to the AGC.
+# ISP IPA (ipa_soft_simple.so) from the Fedora source package of the installed
+# libcamera, plus our IPA patches: patches/libcamera-0.7/0001-0003 and 0006 on
+# libcamera 0.7.x (patches/0001-0002 on 0.5.x). Writes prebuilt/BUILT_FOR.
 #
 # This is how prebuilt/ipa_soft_simple.so was produced. You normally do NOT need
 # to run this — apply-ipa-agc-patch.sh installs the prebuilt .so directly. Run
@@ -31,7 +33,7 @@ tar xf libcamera-v$VER.tar.bz2
 cd libcamera-v$VER
 for p in "$WORK"/0*.patch; do patch -p1 -i "$p" >/dev/null; done
 
-echo "[3/5] Applying the soft-ISP IPA patches (AGC ExposureValue + AWB manual WB)"
+echo "[3/5] Applying the soft-ISP IPA patches (EV, manual AWB, Adjust defaults, EV follows light)"
 # 0.7 reworked the AGC and renamed YamlObject -> ValueNode, so it has its own rebased series.
 case "$VER" in
     0.5.*) PDIR="$REPO/patches" ;;

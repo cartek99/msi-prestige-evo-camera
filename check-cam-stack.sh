@@ -4,6 +4,11 @@
 #   bash ~/ipu7-cam-fix/check-cam-stack.sh
 # Read-only. Exit code 0 = all good, 1 = action needed.
 # History: created 2026-07-06, the day the camera first fully worked.
+# Method: walks the stack bottom-up, one numbered section per layer, so the first failing
+# section is the layer to fix: [1]-[5b] kernel (headers, DKMS or stock fixes, board data),
+# [6] sensor bound + media graph, [7]-[7b] userspace sees the camera + tuning file installed,
+# [8a]-[8] v4l2loopback + exactly one relay, [9]-[10] patched IPA, versionlock and look,
+# [11]-[12] enhanced chain (M2) and the parked M3 build. ok/warn lines only; nothing is changed.
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 KVER=$(uname -r)

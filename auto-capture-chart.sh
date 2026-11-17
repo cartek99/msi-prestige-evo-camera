@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: HISTORICAL — libcamera 0.5 era: the calibration tuning uses Lut (0.7 calls it Adjust). Update before reuse. See README.md.
 # auto-capture-chart.sh — fully hands-off color-target capture.
 #
 # Opens a live preview, gives you a 20s countdown to hold the printed chart

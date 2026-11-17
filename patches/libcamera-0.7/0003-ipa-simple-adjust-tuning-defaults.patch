@@ -1,3 +1,22 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH for 0.7] ipa: simple: adjust: Take gamma, contrast and saturation defaults from the tuning file
+
+The Adjust algorithm starts every stream with hardcoded defaults (gamma 2.2,
+no contrast or saturation change) and only changes them when the application
+sets the Gamma, Contrast or Saturation controls. PipeWire consumers (GNOME
+Snapshot, browsers through the portal) and the libcamera-loopback relay never
+set them, so a per-sensor look could not change the tone curve at all.
+
+Read optional "gamma", "contrast" and "saturation" keys from the Adjust
+section of the tuning file and use them as the defaults: in configure() and
+as the default value of each control. A key that is absent keeps the stock
+behaviour; saturation is only read when the CCM is enabled, as the control is
+only registered then. An application that sets a control still overrides the
+default. Logs the effective defaults once at init.
+
+The looks in looks/*.yaml rely on this (Adjust gamma/contrast); without the
+patch they load but the tone keys are ignored.
+---
 diff -ru a/src/ipa/simple/algorithms/adjust.cpp b/src/ipa/simple/algorithms/adjust.cpp
 --- a/src/ipa/simple/algorithms/adjust.cpp
 +++ b/src/ipa/simple/algorithms/adjust.cpp

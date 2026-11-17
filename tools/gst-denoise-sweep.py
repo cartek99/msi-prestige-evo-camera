@@ -70,6 +70,9 @@ def gray_frames(path, start, n):
 
 
 def speckle(path, start, n=20):
+    """Impulse-noise count: pixels whose luma differs by more than 20 (8-bit) from their 3x3
+    median, averaged per frame over n frames from start.
+    """
     fr = gray_frames(path, start, n)
     tot = 0
     for f in fr:
@@ -79,6 +82,7 @@ def speckle(path, start, n=20):
 
 
 def colour(path, regions, frame):
+    """Mean luma, R/G and B/G of each region in one frame, to check a filter does not shift colour."""
     tmp = "/tmp/gsweep-colour.png"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", f"select=eq(n\\,{frame})",
                     "-frames:v", "1", tmp], check=True)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# STATUS: HISTORICAL — kernel bring-up (2026-07); the stock kernel now binds the sensor. See README.md.
 # OV5675 probe diagnostic — run with sudo:  sudo bash ~/ipu7-cam-fix/diag-ov5675.sh
 set +e
 

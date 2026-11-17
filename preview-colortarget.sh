@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: HISTORICAL — libcamera 0.5 era: the calibration tuning uses Lut (0.7 calls it Adjust). Update before reuse. See README.md.
 # preview-colortarget.sh — LIVE preview while capturing calibration frames of a
 # color target (ColorChecker). Opens a video window so you can align the card,
 # and auto-saves a frame every second in the background (keeps the last 20).

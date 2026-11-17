@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: HISTORICAL — libcamera 0.5 era: the calibration tuning uses Lut (0.7 calls it Adjust). Update before reuse. See README.md.
 # capture-colortarget.sh — grab calibration frames of a color target (e.g.
 # ColorChecker 24) for the proper-CCM solve. Configures the pipeline for
 # calibration: IDENTITY CCM, UNITY white-balance gains, neutral contrast, and

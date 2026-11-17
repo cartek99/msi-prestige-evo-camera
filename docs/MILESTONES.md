@@ -7,6 +7,7 @@
 | M2 | "Built-in Camera (Enhanced)" for all apps: GPU chain in the relay, fallback, watchdog, WirePlumber rule | done |
 | M3 | Face/centre-weighted exposure (patches 0004/0005, private libcamera in /opt) | parked: a fixed window can't follow the face |
 | M4 | Speckle filter (`shaders/impulse3x3.frag`, chain `v64x2i`) + EV follows scene light (patch 0006, look `auto-v1`) | done |
+| Upstream | softisp tuning file for libcamera master, calibrated from the Windows driver's AIQB (`upstream/`, `docs/UPSTREAM.md`) | tested 2026-11-17; patch ready |
 
 Measured on the A2VMG at 1080p30:
 - Night temporal noise (luma) 5.40 → 1.71 with `v64x2`. Speckle 3156 → 17 px/frame with `v64x2i`. Colour within 0.3%, no ghosting.

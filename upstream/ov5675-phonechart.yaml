@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  # Single-illuminant CCM for daylight (about 6500 K), fitted against a
+  # colour chart displayed on a phone screen and refined by eye, then
+  # normalised so that each row sums to 1. Not a physical ColorChecker
+  # solve.
+  - Ccm:
+      ccms:
+        - ct: 6500
+          ccm: [  1.564, -0.398, -0.166,
+                 -0.330,  1.473, -0.143,
+                 -0.119, -0.531,  1.650 ]
+  - Adjust:
+  - Agc:
+      AeConstraintMode:
+        Normal:
+          # The default constraint: the brightest 2% at least 0.5.
+          lower:
+            qLo: 0.98
+            qHi: 1.0
+            yTarget: 0.5
+          # Limit highlight clipping: the brightest 2% at most 0.9.
+          upper:
+            qLo: 0.98
+            qHi: 1.0
+            yTarget: 0.9
+...

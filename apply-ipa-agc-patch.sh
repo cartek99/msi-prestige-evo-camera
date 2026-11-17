@@ -1,9 +1,12 @@
 #!/bin/bash
-# apply-ipa-agc-patch.sh — install the patched libcamera soft-ISP IPA that adds
-# ExposureValue support, plus the ov5675.yaml tuning that sets exposureValue:
-# -0.75. Together these fix the AGC highlight clipping (pink mottle on bright
-# white fabric) at the libcamera layer, so ALL consumers benefit (Teams relay,
-# GNOME Snapshot, Firefox, qcam).
+# apply-ipa-agc-patch.sh — install the patched libcamera soft-ISP IPA (prebuilt/ipa_soft_simple.so,
+# built by build-ipa-patch.sh) system-wide, so ALL consumers get it (relay, Snapshot, Firefox, qcam).
+# On libcamera 0.7.2 it carries patches/libcamera-0.7/:
+#   0001 AGC honours ExposureValue + a tuning default (the original fix for pink, clipped highlights)
+#   0002 AWB manual / fixed white balance      0003 Adjust defaults from the tuning file
+#   0006 the EV bias follows the scene light (used by the auto look)
+# The tuning file itself is not touched: the installed look (cam-look) stays, and the relay restarts.
+# Refuses to install if prebuilt/BUILT_FOR does not match the installed libcamera build.
 #
 # Idempotent. Backs up the stock IPA the first time. Run:
 #   sudo bash ~/ipu7-cam-fix/apply-ipa-agc-patch.sh

@@ -1,11 +1,17 @@
 #!/bin/bash
-# upstream-ab.sh — QA Test B: libcamera master (private build, nothing installed) with and without
-# upstream/ov5675.yaml, plus a reference frame from today's relay. No sudo; the relay must be idle.
-#   bash tools/upstream-ab.sh LABEL            runs: today master-stock master-ov5675
+# upstream-ab.sh — camera A/B of tuning files on libcamera master (private build, nothing installed),
+# plus a reference frame from today's relay. Started as QA Test B; now also compares the AIQB
+# variants. No sudo; the relay must be idle. Each master run points LIBCAMERA_IPA_CONFIG_PATH at a
+# temp dir holding one yaml as softisp/ov5675.yaml, so the build and the system stay untouched.
+#   bash tools/upstream-ab.sh LABEL            runs: today master-stock master-ov5675 master-aiqb
+#                                              master-aiqb-lsc70 master-aiqb-t05 master-aiqb-t05-luma
+#   (master-ov5675 = upstream/ov5675.yaml, the file in the patch; the aiqb runs are its variants)
 #   ONLY="master-ov5675" bash tools/upstream-ab.sh LABEL
 #   FPS30=1 ...   lock 30 fps (FrameDurationLimits, as libcamerasrc framerate=30/1 does); cam alone lets AGC drop to 15 fps
 # Each run: 1920x1080, 120 frames (~4 s), frames 100-119 kept. Output data/upstream-ab-LABEL/:
-#   <run>.png (frame 110), <run>.log (cam --metadata), summary.txt, side-by-side.png
+#   <run>.png (frame 110), <run>.log (cam --metadata), summary.txt, side-by-side.png (2 columns
+#   when more than 3 runs). summary.txt per run: mean Y, clip %, centre Y, corner/centre Y
+#   (vignetting), centre R/G and B/G (white balance of the face region).
 set -u
 LABEL=${1:?usage: upstream-ab.sh LABEL}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -31,7 +37,11 @@ clip = sum(1 for p in px if max(p) >= 250) * 100 / (w * h)
 c = im.crop((w * 3 // 8, h // 4, w * 5 // 8, h * 3 // 4))      # centre (face) region
 r, g, b = ImageStat.Stat(c).mean
 cy = ImageStat.Stat(c.convert("L")).mean[0]
-print(f"mean Y {y:5.1f}  clip {clip:4.1f}%  centre Y {cy:5.1f}  centre R/G {r/g:.3f} B/G {b/g:.3f}")
+k = 10                                                        # corners: 1/10 of each side
+cs = [im.crop(b).convert("L") for b in ((0, 0, w // k, h // k), (w - w // k, 0, w, h // k),
+                                       (0, h - h // k, w // k, h), (w - w // k, h - h // k, w, h))]
+corner = sum(ImageStat.Stat(x).mean[0] for x in cs) / 4
+print(f"mean Y {y:5.1f}  clip {clip:4.1f}%  centre Y {cy:5.1f}  corner/centre {corner / cy:.2f}  centre R/G {r/g:.3f} B/G {b/g:.3f}")
 PY
 }
 
@@ -73,14 +83,24 @@ master() {   # master NAME [TUNING_YAML]
     ls "$d" | sort | sed -n '1,99p' | (cd "$d" && xargs rm -f)   # keep frames 100-120
     result "$name" "$( [ -n "$yaml" ] && basename "$yaml" || echo uncalibrated.yaml )${FPS30:+, locked 30 fps}"
 }
-master master-stock
+master master-stock "$(dirname "$B")/src/ipa/softisp/data/uncalibrated.yaml"   # forced: an in-tree ov5675.yaml would win otherwise
 master master-ov5675 "$REPO/upstream/ov5675.yaml"
+master master-aiqb "$REPO/upstream/ov5675-aiqb.yaml"             # Windows-driver AIQB: 6 CCMs, bayes AWB, full LSC
+master master-aiqb-lsc70 "$REPO/upstream/ov5675-aiqb-lsc70.yaml" # same, lens shading at 70% strength
+master master-aiqb-t05 "$REPO/upstream/ov5675-aiqb-t05.yaml"     # AWB may move 0.05 towards green off the CT curve (LED lamps)
+master master-aiqb-t05-luma "$REPO/upstream/ov5675-aiqb-t05-luma.yaml"  # same, LSC brightness only (no colour shading)
 
-imgs=(); for r in today master-stock master-ov5675; do [ -f "$OUT/$r.png" ] && imgs+=("$OUT/$r.png"); done
+imgs=(); for r in today master-stock master-ov5675 master-aiqb master-aiqb-lsc70 master-aiqb-t05 master-aiqb-t05-luma; do [ -f "$OUT/$r.png" ] && imgs+=("$OUT/$r.png"); done
 if [ "${#imgs[@]}" -ge 2 ]; then
     args=(); for i in "${imgs[@]}"; do args+=(-i "$i"); done
     f=""; for k in $(seq 0 $((${#imgs[@]} - 1))); do f+="[$k:v]scale=960:540,drawtext=text='$(basename "${imgs[$k]}" .png)':x=10:y=10:fontsize=28:fontcolor=yellow:box=1:boxcolor=black@0.5[v$k];"; done
     for k in $(seq 0 $((${#imgs[@]} - 1))); do f+="[v$k]"; done
-    ffmpeg -v error -y "${args[@]}" -filter_complex "${f}hstack=inputs=${#imgs[@]}" "$OUT/side-by-side.png" && echo "side by side: $OUT/side-by-side.png"
+    n=${#imgs[@]}
+    if [ "$n" -le 3 ]; then stack="hstack=inputs=$n"
+    else                    # two columns
+        lay=""; for k in $(seq 0 $((n - 1))); do lay+="$((k % 2 * 960))_$((k / 2 * 540))|"; done
+        stack="xstack=inputs=$n:layout=${lay%|}:fill=black"
+    fi
+    ffmpeg -v error -y "${args[@]}" -filter_complex "${f}${stack}" "$OUT/side-by-side.png" && echo "side by side: $OUT/side-by-side.png"
 fi
 echo "frames kept in $WORK (delete when done)"

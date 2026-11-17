@@ -11,13 +11,14 @@ tuning file in `upstream/` and the plan in `docs/UPSTREAM.md`, which is being se
 ## What is here
 | Piece | Files | What it does |
 |---|---|---|
-| Tuning | `ov5675.yaml`, `looks/*.yaml` | CCM, gamma/contrast, exposure bias. `cam-look day|night|auto` switches looks |
+| Tuning | `ov5675.yaml`, `looks/*.yaml` | CCM, gamma/contrast, exposure bias. `cam-look day\|night\|auto` switches looks |
 | IPA patches (0.7.2) | `patches/libcamera-0.7/0001-0006` | AGC ExposureValue + tuning default (fixes clipped, pink highlights), manual AWB, Adjust defaults from tuning, EV follows scene light (0006). 0004/0005 are an experiment (centre-weighted AE), off by default |
 | Relay | `packaging/fedora/`, `patches/libcamera-loopback/` | Fedora RPM of [libcamera-loopback](https://github.com/alanbato/libcamera-loopback) plus patches: stop before suspend, fall back to the plain camera, watchdog + retry. Serves "Built-in Camera (Enhanced)" to Chrome/Teams/Zoom and PipeWire apps |
 | Denoise | `cam-enhance.sh`, `shaders/impulse3x3.frag` | GPU chain `v64x2i`: two VA-API denoise passes + a 3×3 impulse (speckle) filter |
 | Health check | `check-cam-stack.sh` | Read-only check of kernel → libcamera → IPA → tuning → relay. Run after updates |
 | Calibration | `CALIBRATION.md`, `capture-colortarget.sh`, `tools/colorchecker-fit.py` | CCM solve from a colour-target capture |
 | Measurement | `tools/` | noise, clipping, ghosting, frame timing, soak tests |
+| Upstream (libcamera master / 0.8) | `upstream/`, `tools/aiqb-to-softisp.py`, `tools/upstream-ab.sh`, `tools/flatfield-analyse.py`, `docs/UPSTREAM.md` | softisp tuning file calibrated from the Windows driver's AIQB (bayes AWB, 6 colour matrices, lens shading), the converter, the camera A/B and the raw flat-field check |
 
 ## Results (A2VMG, 1080p30)
 - Night temporal noise (luma) 5.40 → 1.71 (−68%) with the two-pass VA-API denoise; night speckle 3156 → 17 px/frame with the impulse filter.
@@ -55,6 +56,14 @@ bash check-cam-stack.sh
 ```
 Rollback: `sudo cam-look day|night`, `sudo cam-enhance raw`. The spec header lists the steps to remove the relay.
 
+## Current and historical scripts
+Each script starts with a header comment; older ones carry a `STATUS:` line under the shebang.
+| Status | Files |
+|---|---|
+| Current | `install-cam-tools.sh`, `cam-look.sh`, `cam-enhance.sh`, `cam-wp-rule.sh`, `check-cam-stack.sh`, `apply-ipa-agc-patch.sh`, `build-ipa-patch.sh`, `cam-tune.sh`, `record-clip.sh`, `grab-direct.sh`, `tools/` |
+| Parked (built, off) | `cam-ae.sh`, `build-libcamera-private.sh`, `tools/ae-sweep.sh`, patches 0004/0005 |
+| Historical (kept for reference) | `capture-frame.sh` (old v4l2-relayd relay), `capture-colortarget.sh`, `preview-colortarget.sh`, `auto-capture-chart.sh` (libcamera 0.5 tuning format; update `Lut` to `Adjust` before reuse), `diag-ov5675.sh` (kernel bring-up) |
+
 ## Security notes
 - The relay (`libcamera-loopback`) runs as a **root system service** without systemd sandboxing, as upstream ships it.
   It reads only the camera and writes only the loopback device. Hardening it (dedicated user, `ProtectSystem=strict`)
@@ -64,7 +73,8 @@ Rollback: `sudo cam-look day|night`, `sudo cam-enhance raw`. The spec header lis
 
 ## Status
 Personal project, tested on one laptop. Patches upstream to libcamera are in progress (see `docs/UPSTREAM.md`).
-Built with AI assistance (Claude Code). The 0.7.2 setup is tested on the A2VMG; `upstream/` is a draft, not yet tested.
+Built with AI assistance (Claude Code). The 0.7.2 setup is tested on the A2VMG. `upstream/ov5675.yaml` is tested on libcamera
+master on the A2VMG (daylight and evening A/B, raw flat field; 2026-11-17); the steps and results are in `docs/UPSTREAM.md`.
 
 ## License
 **Short version: MIT. Use, copy and change it freely; keep the copyright notice if you copy the scripts.**

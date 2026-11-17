@@ -1,3 +1,17 @@
+From: Keith Carter <oss@keithbcarter.com>
+Subject: [PATCH] Stop the camera before suspend, restart it on resume
+
+The Intel IPU7 ISYS driver refuses to suspend (-EBUSY) while the camera
+streams. With an app such as Teams holding the loopback device open, closing
+the lid left the laptop awake.
+
+Take a logind "delay" sleep inhibitor and subscribe to PrepareForSleep on the
+system bus. On PrepareForSleep(true) stop the capture pipeline, block
+start() while sleeping, and release the inhibitor so the suspend proceeds. On
+PrepareForSleep(false) take a new inhibitor and restart the pipeline if the
+last CLIENT_USAGE event reported any reader. Without a system bus or the
+inhibitor the relay runs as before and logs that suspend handling is off.
+---
 --- a/libcamera-loopback.py
 +++ b/libcamera-loopback.py
 @@ -30,7 +30,7 @@

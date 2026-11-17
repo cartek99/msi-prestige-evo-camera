@@ -1,4 +1,5 @@
 #!/bin/bash
+# STATUS: PARKED — PLAN M3 face-weighted exposure, built but off since 2026-11-11 (fixed windows cannot follow a face). See README.md.
 # cam-ae.sh — face-weighted exposure for the relay via the private libcamera (PLAN M3).
 #   cam-ae                       status
 #   sudo cam-ae on [x,y,w,h,wt]  relay uses /opt/libcamera-ae with centre-weighted metering
