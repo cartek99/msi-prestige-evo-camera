@@ -1,8 +1,8 @@
 // impulse3x3.frag — PLAN M4a: remove salt-and-pepper speckle, i.e. random per-frame impulse
 // noise that the VA denoise leaves behind (~0.15% of pixels at night, 2026-11-11 sweep).
 // 3x3 per-channel median (min/max exchange network), applied only where the centre pixel's
-// luma differs from the median's by more than the uniform thresh (0.06 = 15/255), so fine detail
-// (eyelashes, hair, text) passes through untouched. For gst glshader: tex/width/height are set by glshader; thresh via
+// luma differs from the median's by more than the uniform thresh (0.06 = 15/255), so flat areas, edges and detail
+// 2+ pixels wide pass through untouched (1-pixel-wide high-contrast lines do not; docs/EXPLAIN-impulse3x3.md). For gst glshader: tex/width/height are set by glshader; thresh via
 // uniforms="uniforms,thresh=(float)0.06" (unset = 0.0 = full median).
 // cam-enhance.sh flattens this file to one line for LOOPBACK_SOURCE: so NO preprocessor
 // lines (#...), NO quote characters, and comments only on lines starting with //.

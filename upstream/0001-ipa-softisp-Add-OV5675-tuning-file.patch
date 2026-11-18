@@ -80,9 +80,9 @@ Notes:
     tools and the dated steps are public:
     https://github.com/cartek99/msi-prestige-evo-camera
     (tools/aiqb-to-softisp.py, docs/UPSTREAM.md). The numbers come from a
-    vendor calibration blob, as in
-    the OV2740 and Surface Pro 8 tuning files posted earlier; if that is a
-    problem for a CC0 data file, please let me know.
+    vendor calibration blob, as in the OV2740 and Surface Pro 8 tuning files
+    posted earlier; if that is a problem for a CC0 data file, please let me
+    know.
     
     I picked the 0.9 upper bound from tests of a similar highlight guard on
     libcamera 0.7.2 in a bright meeting room, where it reduced clipping on a

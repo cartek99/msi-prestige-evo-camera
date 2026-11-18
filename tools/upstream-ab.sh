@@ -7,6 +7,9 @@
 #                                              master-aiqb-lsc70 master-aiqb-t05 master-aiqb-t05-luma
 #   (master-ov5675 = upstream/ov5675.yaml, the file in the patch; the aiqb runs are its variants)
 #   ONLY="master-ov5675" bash tools/upstream-ab.sh LABEL
+#   LC_UPSTREAM=~/.cache/ipu7-cam/lc-upstream/build-lux ONLY="master-ov5675 master-lux" FPS30=1 ...
+#                 softisp Lux test on Kieran's branch (same build, with and without the Lux block)
+#   AGCLOG=1 ...  AgcMeanLuminance debug: summary counts AGC log samples (frames 20+) where the lower/upper AE constraint set the gain
 #   FPS30=1 ...   lock 30 fps (FrameDurationLimits, as libcamerasrc framerate=30/1 does); cam alone lets AGC drop to 15 fps
 # Each run: 1920x1080, 120 frames (~4 s), frames 100-119 kept. Output data/upstream-ab-LABEL/:
 #   <run>.png (frame 110), <run>.log (cam --metadata), summary.txt, side-by-side.png (2 columns
@@ -28,7 +31,7 @@ fi
 metrics() {   # metrics PNG -> "mean Y .. clip ..% centre RGB r/g b/g"
 python3 - "$1" <<'PY'
 import sys
-from PIL import Image, ImageStat
+from PIL import Image, ImageStat, ImageChops, ImageFilter
 im = Image.open(sys.argv[1]).convert("RGB")
 w, h = im.size
 y = ImageStat.Stat(im.convert("L")).mean[0]
@@ -41,7 +44,10 @@ k = 10                                                        # corners: 1/10 of
 cs = [im.crop(b).convert("L") for b in ((0, 0, w // k, h // k), (w - w // k, 0, w, h // k),
                                        (0, h - h // k, w // k, h), (w - w // k, h - h // k, w, h))]
 corner = sum(ImageStat.Stat(x).mean[0] for x in cs) / 4
-print(f"mean Y {y:5.1f}  clip {clip:4.1f}%  centre Y {cy:5.1f}  corner/centre {corner / cy:.2f}  centre R/G {r/g:.3f} B/G {b/g:.3f}")
+L = im.convert("L")                                            # speckle: luma > 20 off its 3x3 median
+diff = ImageChops.difference(L, L.filter(ImageFilter.MedianFilter(3)))
+speck = diff.point(lambda v: 255 if v > 20 else 0).histogram()[255] * 100 / (w * h)
+print(f"mean Y {y:5.1f}  clip {clip:4.1f}%  centre Y {cy:5.1f}  corner/centre {corner / cy:.2f}  centre R/G {r/g:.3f} B/G {b/g:.3f}  speckle {speck:.3f}%")
 PY
 }
 
@@ -53,6 +59,10 @@ result() {   # result NAME NOTE
         grep -oE 'ExposureTime = [0-9]+' "$OUT/$name.log" | tail -1
         grep -oE 'AnalogueGain = [0-9.]+' "$OUT/$name.log" | tail -1
         grep -oE 'Lux = [0-9.]+' "$OUT/$name.log" | tail -1
+        awk '/ seq: /{f=$0; sub(/.*seq: /,"",f); f=f+0} f>=20 && /Lux = /{v[n++]=$NF}
+             f>=20 && /Y value: /{s[f]=1} f>=20 && /Apply lower bound/{lo[f]=1} f>=20 && /Apply upper bound/{up[f]=1}
+             END{if(n){asort(v); printf "Lux median (frames 20+) %.0f  min %.0f  max %.0f\n", v[int((n+1)/2)], v[1], v[n]}
+                 ns=length(s); if(ns) printf "AE bound active (frames 20+, %d AGC log samples; AGC logs about every 4th frame): lower %d  upper %d\n", ns, length(lo), length(up)}' "$OUT/$name.log"
         grep -E 'ERROR|Tuning|tuning|yaml' "$OUT/$name.log" | grep -v 'rectangle 3' | sed 's/^\[[^]]*\] *\[[0-9]*\] *//' | sort -u | head -4
       }
     } | tee -a "$OUT/summary.txt"
@@ -72,7 +82,7 @@ master() {   # master NAME [TUNING_YAML]
     want "$name" || return 0
     echo ">> $name"
     rm -rf "$d"; mkdir -p "$d" "$TMP/$name/softisp"
-    local env=(LIBCAMERA_LOG_LEVELS='*:WARN,IPAProxy:INFO')
+    local env=(LIBCAMERA_LOG_LEVELS="*:WARN,IPAProxy:INFO${AGCLOG:+,AgcMeanLuminance:DEBUG}")
     if [ -n "$yaml" ]; then cp "$yaml" "$TMP/$name/softisp/ov5675.yaml"; env+=(LIBCAMERA_IPA_CONFIG_PATH="$TMP/$name"); fi
     local script=(); [ -n "${FPS30:-}" ] && script=(--script "$REPO/tools/upstream-ab-30fps.yaml")
     env "${env[@]}" timeout 60 "$CAM" -c 1 --capture=120 --metadata "${script[@]}" \
@@ -89,8 +99,9 @@ master master-aiqb "$REPO/upstream/ov5675-aiqb.yaml"             # Windows-drive
 master master-aiqb-lsc70 "$REPO/upstream/ov5675-aiqb-lsc70.yaml" # same, lens shading at 70% strength
 master master-aiqb-t05 "$REPO/upstream/ov5675-aiqb-t05.yaml"     # AWB may move 0.05 towards green off the CT curve (LED lamps)
 master master-aiqb-t05-luma "$REPO/upstream/ov5675-aiqb-t05-luma.yaml"  # same, LSC brightness only (no colour shading)
+master master-lux "$REPO/upstream/ov5675-lux.yaml"               # TEST ONLY: + softisp Lux (needs Kieran's branch: LC_UPSTREAM=.../build-lux)
 
-imgs=(); for r in today master-stock master-ov5675 master-aiqb master-aiqb-lsc70 master-aiqb-t05 master-aiqb-t05-luma; do [ -f "$OUT/$r.png" ] && imgs+=("$OUT/$r.png"); done
+imgs=(); for r in today master-stock master-ov5675 master-aiqb master-aiqb-lsc70 master-aiqb-t05 master-aiqb-t05-luma master-lux; do [ -f "$OUT/$r.png" ] && imgs+=("$OUT/$r.png"); done
 if [ "${#imgs[@]}" -ge 2 ]; then
     args=(); for i in "${imgs[@]}"; do args+=(-i "$i"); done
     f=""; for k in $(seq 0 $((${#imgs[@]} - 1))); do f+="[$k:v]scale=960:540,drawtext=text='$(basename "${imgs[$k]}" .png)':x=10:y=10:fontsize=28:fontcolor=yellow:box=1:boxcolor=black@0.5[v$k];"; done
