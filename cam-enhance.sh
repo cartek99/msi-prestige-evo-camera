@@ -24,9 +24,13 @@ CAM='libcamerasrc camera-name=\\_SB_.LNK0'
 # LOOPBACK_SOURCE (two caps in a row = parse error), and those bring frames back to system memory.
 CAPS='video/x-raw,width=1920,height=1080,framerate=30/1'
 DN='vapostproc denoise=64'
+# libcamerasrc delivers RGBA, and the VA denoise silently does nothing on RGBA (night clip: noise_t_y
+# 5.36 -> 5.17 as RGBA vs 1.39 as NV12; live café ceiling 2.93 -> 2.92). Convert to NV12 on the GPU
+# first, as the offline M1/M4 sweeps (NV12 input) assumed. Found 2026-11-23.
+TONV12='vapostproc ! video/x-raw(memory:VAMemory),format=NV12'
 SRC_RAW="$CAM"
-SRC_V64="$CAM ! $CAPS ! $DN"
-SRC_V64X2="$CAM ! $CAPS ! $DN ! $DN"
+SRC_V64="$CAM ! $CAPS ! $TONV12 ! $DN"
+SRC_V64X2="$CAM ! $CAPS ! $TONV12 ! $DN ! $DN"
 # M4a impulse filter: conditional 3x3 median in a GL shader (shaders/impulse3x3.frag), flattened
 # to one line because glshader only takes inline source. The round trip goes back to NV12 on the
 # GPU: leaving it RGBA drops the colorimetry and shifts colour (B/G -4% on the face, 2026-11-11).

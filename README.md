@@ -6,7 +6,7 @@ covers what happens after the sensor binds: colour, exposure, noise, and getting
 
 **Scope:** Fedora 45, libcamera **0.7.2**. libcamera 0.8 renamed the soft-ISP IPA (`simple` → `softisp`)
 and moved its AGC/AWB to libipa, so the 0.7.2 patches here do not apply to 0.8. The 0.8 route is the
-tuning file in `upstream/` and the plan in `docs/UPSTREAM.md`, which is being sent to libcamera upstream.
+tuning file in `upstream/` (posted to libcamera as https://patchwork.libcamera.org/patch/28936/) and the plan in `docs/UPSTREAM.md`.
 
 ## What is here
 | Piece | Files | What it does |
@@ -23,6 +23,11 @@ tuning file in `upstream/` and the plan in `docs/UPSTREAM.md`, which is being se
 ## Results (A2VMG, 1080p30)
 - Night temporal noise (luma) 5.40 → 1.71 (−68%) with the two-pass VA-API denoise; night speckle 3156 → 17 px/frame with the impulse filter.
 - The denoise adds about 11 ms latency and about 7.6% of one CPU core. A 30-minute Teams call on battery held 29.9–30.0 fps with 0 late frames.
+- **Correction (2026-11-23):** until this date the live chain did no denoising. libcamera delivers RGBA, and the VA-API
+  denoise silently does nothing on RGBA; the noise figures above come from offline tests on NV12. `cam-enhance.sh` now converts
+  to NV12 on the GPU first, and the live static-area noise drops to about zero at 30 fps. The latency, CPU and call figures above
+  were measured before this fix. Trade-off: some ghosting on fast motion (trails on moving edges); `sudo cam-enhance v64i`
+  (one denoise pass) is milder.
 - Works in Chrome, Teams, Zoom and GNOME Snapshot, survives suspend, and falls back to the plain camera if the GPU chain fails.
 
 ## Install (Fedora 45, libcamera 0.7.2)
